@@ -58,16 +58,6 @@ export function normalizeHindiText(text: string): string {
     "स्पेज-पप": "List-II"
   };
   
-for (const [corrupt, exactEnglish] of Object.entries(englishShiftMismatches)) {
-    out = out.split(corrupt).join(exactEnglish);
-  };
-  // 5. डिक्शनरी लूप को लागू करना
-  for (const [corrupt, fixed] of Object.entries(legacyCorrections)) {
-    out = out.split(corrupt).join(fixed);
-  }
-
-  // 6. अवशिष्ट रेगुलर एक्सप्रेशन क्लीनअप (अतिरिक्त सुरक्षा परत)
-  out = out.replace(/([0-9]+)ः/g, "$1%");
   const legacyCorrections: Record<string, string> = {
     // === Core Structure Framework Corrections ===
     "क्षे%": "क्षेत्र",
