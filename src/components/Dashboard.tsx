@@ -1041,16 +1041,16 @@ export default function Dashboard() {
 
                   <div className="space-y-4">
                     <div>
-                      <label className="block text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-2 ml-1">Practice Subject</label>
+                     <label className="block text-[10px] font-black text-slate-900 dark:text-slate-900 uppercase tracking-widest mb-2 ml-1"> Practice Subject</label>
                       <div className="relative">
                         <select 
                           value={quizSubject}
                           onChange={(e) => setQuizSubject(e.target.value)}
-                          className="w-full bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-750 px-4 py-3.5 rounded-xl text-xs font-bold appearance-none outline-none focus:ring-2 focus:ring-indigo-500/20 text-slate-900 dark:text-slate-100"
+                          className="w-full bg-slate-50 dark:bg-slate-650 border border-slate-200 dark:border-slate-750 px-4 py-3.5 rounded-xl text-xs font-bold appearance-none outline-none focus:ring-2 focus:ring-indigo-500/20 text-slate-900 dark:text-slate-100"
                         >
-                          <option className="dark:bg-slate-900 text-slate-900 dark:text-slate-100">All Subjects</option>
+                          <option className="dark:bg-slate-900 text-black-900 dark:text-slate-100">All Subjects</option>
                           {availableSubjects.map(sub => (
-                            <option key={sub} value={sub} className="dark:bg-slate-900 text-slate-900 dark:text-slate-100">{sub}</option>
+                            <option key={sub} value={sub} className="dark:bg-slate-900 text-slate-700 dark:text-slate-100">{sub}</option>
                           ))}
                         </select>
                         <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
@@ -1059,12 +1059,12 @@ export default function Dashboard() {
 
                     <div className="grid grid-cols-2 gap-3.5">
                       <div>
-                        <label className="block text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-2 ml-1">Questions</label>
+                        <label className="block text-[10px] font-black text-slate-700 dark:text-slate-500 uppercase tracking-widest mb-2 ml-1">Questions</label>
                         <input 
                           type="number"
                           value={quizCount}
                           onChange={(e) => setQuizCount(Math.max(1, parseInt(e.target.value) || 0))}
-                          className="w-full bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-750 px-4 py-3 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500/20 text-slate-900 dark:text-slate-100"
+                          className="w-full bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-750 px-4 py-3 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500/20 text-black-900 dark:text-black-100"
                         />
                       </div>
                       <div>
@@ -1074,7 +1074,7 @@ export default function Dashboard() {
                           value={timerMinutes}
                           max={180}
                           onChange={(e) => setTimerMinutes(Math.min(180, Math.max(1, parseInt(e.target.value) || 0)))}
-                          className="w-full bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-750 px-4 py-3 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500/20 text-slate-900 dark:text-slate-100"
+                          className="w-full bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-750 px-4 py-3 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500/20 text-black-900 dark:text-black-100"
                           disabled={!hasTimer}
                         />
                       </div>
