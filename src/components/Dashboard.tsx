@@ -12,7 +12,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { parseUniversalHTML } from '../lib/htmlParser';
-import { SAMPLE_QUESTIONS, SAMPLE_ATTEMPTS } from '../utils/sampleData';
+import { SAMPLE_QUESTIONS } from '../utils/sampleData';
 import { 
   ResponsiveContainer, 
   LineChart, 
@@ -55,6 +55,12 @@ import {
 import { Question, TestAttempt, QuizSettings, ExamCounter, DailyGoal } from '../types';
 import MockTestInterface from './MockTestInterface';
 import FormattedText from './FormattedText';
+
+// Local UI Interface for keeping bookmarks/reviews separate per device
+interface LocalReviewState {
+  isBookmarked?: boolean;
+  needsReview?: boolean;
+}
 
 // Exam Counter Card Component
 const ExamCounterCard: React.FC<{ 
@@ -198,8 +204,8 @@ const DailyGoalCard: React.FC<{
 export default function Dashboard() {
   const [questions, setQuestions] = useState<Question[]>([]);
   const [attempts, setAttempts] = useState<TestAttempt[]>([]);
+  const [localReviewBank, setLocalReviewBank] = useState<Record<string, LocalReviewState>>({});
   const [isDarkMode, setIsDarkMode] = useState<boolean>(false);
-  const [userName, setUserName] = useState<string>("Competitor #1");
   const [activeTab, setActiveTab] = useState<string>('mock-config');
 
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
@@ -279,24 +285,31 @@ export default function Dashboard() {
     }
   };
 
-  // Real-time Firebase Sync logic replaces standard getDocs
+  // Setup mount listeners (Realtime Sync & Isolated Local Storage Arrays)
   useEffect(() => {
     const storedTheme = localStorage.getItem('THEME_MODE');
     if (storedTheme === 'dark') {
       setIsDarkMode(true);
     }
 
+    // Load local-only review bank map
+    const storedLocalReview = localStorage.getItem('MOCK_REVIEW_STATES');
+    if (storedLocalReview) {
+      try {
+        setLocalReviewBank(JSON.parse(storedLocalReview));
+      } catch (e) { console.error(e); }
+    }
+
     console.log("Listening to Firestore real-time updates...");
     const q = query(collection(db, "questions"));
     
-    // Real-time listener across all active windows and platforms
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const firestoreQuestions = snapshot.docs.map(doc => ({
         ...doc.data(),
-        firestoreId: doc.id
+        firestoreId: doc.id,
+        id: doc.data().id || doc.id
       })) as Question[];
       
-      console.log(`Real-time sync context active. Total active bank size: ${firestoreQuestions.length}`);
       setQuestions(firestoreQuestions);
       localStorage.setItem("MOCK_QUESTIONS", JSON.stringify(firestoreQuestions));
     }, (error) => {
@@ -307,21 +320,17 @@ export default function Dashboard() {
       }
     });
 
-    const storedName = localStorage.getItem('USER_PROFILE_NAME');
-    if (storedName) {
-      setUserName(storedName);
-    }
-
+    // Default to Empty array for absolute clean state on new devices
     const storedAttempts = localStorage.getItem('MOCK_ATTEMPTS');
     if (storedAttempts) {
       try {
         setAttempts(JSON.parse(storedAttempts));
       } catch (e) {
-        setAttempts(SAMPLE_ATTEMPTS);
+        setAttempts([]);
       }
     } else {
-      setAttempts(SAMPLE_ATTEMPTS);
-      localStorage.setItem('MOCK_ATTEMPTS', JSON.stringify(SAMPLE_ATTEMPTS));
+      setAttempts([]);
+      localStorage.setItem('MOCK_ATTEMPTS', JSON.stringify([]));
     }
 
     const storedExams = localStorage.getItem('MOCK_EXAM_COUNTERS');
@@ -429,14 +438,16 @@ export default function Dashboard() {
   };
 
   const handleResetDatabase = () => {
-    if (window.confirm("Are you sure you want to reset all mock databases back to defaults?")) {
+    if (window.confirm("Are you sure you want to wipe this device's trails and custom counters?")) {
       setQuestions(SAMPLE_QUESTIONS);
-      setAttempts(SAMPLE_ATTEMPTS);
+      setAttempts([]);
+      setLocalReviewBank({});
       localStorage.setItem('MOCK_QUESTIONS', JSON.stringify(SAMPLE_QUESTIONS));
-      localStorage.setItem('MOCK_ATTEMPTS', JSON.stringify(SAMPLE_ATTEMPTS));
+      localStorage.setItem('MOCK_ATTEMPTS', JSON.stringify([]));
+      localStorage.setItem('MOCK_REVIEW_STATES', JSON.stringify({}));
       setReviewedAttempt(null);
       setActiveTab('mock-config');
-      alert("Database reset successfully!");
+      alert("Device logs initialized successfully!");
     }
   };
 
@@ -493,18 +504,6 @@ export default function Dashboard() {
     processFiles(files);
   };
 
-  const updateStagedCorrectIndex = (index: number, val: number) => {
-    const next = [...stagedQuestions];
-    next[index].correctAnswerIndex = val;
-    setStagedQuestions(next);
-  };
-
-  const updateStagedQText = (index: number, val: string) => {
-    const next = [...stagedQuestions];
-    next[index].questionText = val;
-    setStagedQuestions(next);
-  };
-
   const deleteStagedItem = (index: number) => {
     const next = stagedQuestions.filter((_, i) => i !== index);
     setStagedQuestions(next);
@@ -541,9 +540,7 @@ export default function Dashboard() {
       }, 3000);
     } catch (error: any) {
       console.error("Full Firestore Error details:", error);
-      const code = error.code || 'unknown';
-      const message = error.message || 'No message';
-      alert(`Firebase Error (${code}): ${message}. Please check your permissions.`);
+      alert(`Firebase Error. Please check your configurations.`);
       setIsSaving(false);
     }
   };
@@ -611,11 +608,12 @@ export default function Dashboard() {
     setActiveQuizSettings(settings);
   };
 
+  // Handles finish event and isolates review processing flags inside current environment local storage
   const handleFinishQuiz = (attempt: TestAttempt) => {
     const nextAttempts = [attempt, ...attempts];
     saveAttemptsToDB(nextAttempts);
 
-    // Active flags update for review routing
+    // Lock parameters down cleanly to resolve the blank review screen bug
     setReviewedAttempt(attempt);
     setActiveTab('review');
 
@@ -623,24 +621,36 @@ export default function Dashboard() {
       attempt.answers.filter(a => a.selectedIndex !== null).length
     );
 
+    // Save incorrect triggers strictly into local storage review dictionary map
     const wrongIds = attempt.answers.filter(a => !a.isCorrect && a.selectedIndex !== null).map(a => a.questionId);
     if (wrongIds.length > 0) {
-      const nextQuestions = questions.map(q => {
-        if (wrongIds.includes(q.id)) {
-          return { ...q, needsReview: true };
-        }
-        return q;
+      const updatedLocalReview = { ...localReviewBank };
+      wrongIds.forEach(id => {
+        updatedLocalReview[id] = {
+          ...updatedLocalReview[id],
+          needsReview: true
+        };
       });
-      saveQuestionsToDB(nextQuestions);
+      setLocalReviewBank(updatedLocalReview);
+      localStorage.setItem('MOCK_REVIEW_STATES', JSON.stringify(updatedLocalReview));
     }
     
     setActiveQuizQuestions(null);
     setActiveQuizSettings(null);
   };
 
+  // Safe toggling of local device bookmarks without changing Firestore global parameters
   const toggleBookmark = (id: string) => {
-    const next = questions.map(q => q.id === id ? { ...q, isBookmarked: !q.isBookmarked } : q);
-    saveQuestionsToDB(next);
+    const updatedLocalReview = { ...localReviewBank };
+    const currentStatus = updatedLocalReview[id]?.isBookmarked || false;
+    
+    updatedLocalReview[id] = {
+      ...updatedLocalReview[id],
+      isBookmarked: !currentStatus
+    };
+    
+    setLocalReviewBank(updatedLocalReview);
+    localStorage.setItem('MOCK_REVIEW_STATES', JSON.stringify(updatedLocalReview));
   };
 
   const getAvailableSubjects = () => {
@@ -664,6 +674,7 @@ export default function Dashboard() {
 
   const filteredQuestions = getFilteredQuestions();
 
+  // Metrics Evaluation Logic
   const totalTests = attempts.length;
   const avgAccuracy = totalTests > 0 
     ? Math.round(attempts.reduce((sum, att) => sum + att.scorePercentage, 0) / totalTests)
@@ -700,6 +711,9 @@ export default function Dashboard() {
       accuracy: Math.round((subjectsMap[key].correct / subjectsMap[key].total) * 100)
     }));
   };
+
+  // Helper arrays filtered locally per device
+  const deviceReviewQuestions = questions.filter(q => localReviewBank[q.id]?.isBookmarked || localReviewBank[q.id]?.needsReview);
 
   if (activeQuizQuestions && activeQuizSettings) {
     return (
@@ -812,7 +826,7 @@ export default function Dashboard() {
                   <div className="flex-1 flex items-center justify-between text-left">
                     <span>Review Bank</span>
                     <span className="bg-rose-200 dark:bg-rose-800 text-[10px] text-rose-500 font-bold font-mono px-1.5 py-0.5 rounded-md shrink-0">
-                      {questions.filter(q => q.isBookmarked || q.needsReview).length}
+                      {deviceReviewQuestions.length}
                     </span>
                   </div>
                 </button>
@@ -1095,13 +1109,12 @@ export default function Dashboard() {
                   
                   <button
                     onClick={() => {
-                      const reviewList = questions.filter(q => q.isBookmarked || q.needsReview);
-                      if (reviewList.length === 0) {
+                      if (deviceReviewQuestions.length === 0) {
                         alert("No questions in review bank yet!");
                         return;
                       }
-                      const count = Math.min(reviewList.length, 20);
-                      const selected = [...reviewList].sort(() => 0.5 - Math.random()).slice(0, count);
+                      const count = Math.min(deviceReviewQuestions.length, 20);
+                      const selected = [...deviceReviewQuestions].sort(() => 0.5 - Math.random()).slice(0, count);
                       setActiveQuizQuestions(selected);
                       setActiveQuizSettings({
                         questionCount: selected.length,
@@ -1118,26 +1131,26 @@ export default function Dashboard() {
                 </div>
 
                 <div className="grid grid-cols-1 gap-4">
-                  {questions.filter(q => q.isBookmarked || q.needsReview).length === 0 ? (
+                  {deviceReviewQuestions.length === 0 ? (
                     <div className="bg-white dark:bg-slate-900 border-2 border-dashed border-slate-200 dark:border-slate-800 p-12 text-center rounded-[2.5rem]">
                       <Sparkles className="h-12 w-12 text-slate-200 dark:text-slate-800 mx-auto mb-4" />
                       <h3 className="text-lg font-black text-slate-400">Your review bank is empty</h3>
                       <p className="text-xs text-slate-400 mt-2">Finish a mock test or bookmark questions to see them here.</p>
                     </div>
                   ) : (
-                    questions.filter(q => q.isBookmarked || q.needsReview).map(q => (
+                    deviceReviewQuestions.map(q => (
                       <div key={q.id} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-6 rounded-3xl group relative overflow-hidden transition-all hover:shadow-md">
                         <div className="absolute top-0 right-0 p-4 flex space-x-2">
-                           {q.needsReview && (
+                           {localReviewBank[q.id]?.needsReview && (
                             <span className="bg-rose-500/10 text-rose-500 text-[9px] font-black px-2 py-1 rounded-full uppercase tracking-wider border border-rose-500/20">Review Tag</span>
                            )}
                            <button 
                              onClick={() => toggleBookmark(q.id)}
                              className={`h-8 w-8 rounded-xl flex items-center justify-center transition-all ${
-                               q.isBookmarked ? 'bg-amber-100 text-amber-600 border border-amber-200' : 'bg-slate-50 dark:bg-slate-850 text-slate-400 border border-slate-200 dark:border-slate-750'
+                               localReviewBank[q.id]?.isBookmarked ? 'bg-amber-100 text-amber-600 border border-amber-200' : 'bg-slate-50 dark:bg-slate-850 text-slate-400 border border-slate-200 dark:border-slate-750'
                              }`}
                            >
-                            <Check className={`h-4 w-4 ${q.isBookmarked ? 'opacity-100' : 'opacity-30'}`} />
+                            <Check className={`h-4 w-4 ${localReviewBank[q.id]?.isBookmarked ? 'opacity-100' : 'opacity-30'}`} />
                            </button>
                         </div>
                         
@@ -1320,6 +1333,7 @@ export default function Dashboard() {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     {filteredQuestions.map((q) => {
                       const letters = ['A', 'B', 'C', 'D'];
+                      const isBookmarked = localReviewBank[q.id]?.isBookmarked || false;
                       return (
                         <div 
                           key={q.id}
@@ -1332,11 +1346,11 @@ export default function Dashboard() {
                                 <button
                                   onClick={() => toggleBookmark(q.id)}
                                   className={`p-1.5 rounded-md transition-all ${
-                                    q.isBookmarked ? 'bg-amber-100 text-amber-600 border border-amber-200' : 'text-slate-400 hover:text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-950/20'
+                                    isBookmarked ? 'bg-amber-100 text-amber-600 border border-amber-200' : 'text-slate-400 hover:text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-950/20'
                                   }`}
                                   title="Bookmark for review"
                                 >
-                                  <Bookmark className={`h-3.5 w-3.5 ${q.isBookmarked ? 'fill-current' : ''}`} />
+                                  <Bookmark className={`h-3.5 w-3.5 ${isBookmarked ? 'fill-current' : ''}`} />
                                 </button>
                                 <button
                                   onClick={() => handleDeleteFromBank(q.id)}
