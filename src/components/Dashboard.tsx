@@ -303,17 +303,8 @@ export default function Dashboard() {
       console.error("Failed to copy all!", err);
     }
   };
-
-  // Load Database from LocalStorage on mount
-  useEffect(() => {
-    // 1. Theme Check
-    const storedTheme = localStorage.getItem('THEME_MODE');
-    if (storedTheme === 'dark') {
-      setIsDarkMode(true);
-    }
-
-    // 2. Questions
-  const loadQuestionsFromFirestore = async () => {
+    useEffect(() => {
+const loadQuestionsFromFirestore = async () => {
     try {
       console.log('Loading questions from Firestore...');
 
@@ -347,6 +338,15 @@ export default function Dashboard() {
         'Firestore loading error:',
         error
       );
+  // Load Database from LocalStorage on mount
+  useEffect(() => {
+    // 1. Theme Check
+    const storedTheme = localStorage.getItem('THEME_MODE');
+    if (storedTheme === 'dark') {
+      setIsDarkMode(true);
+    }
+
+    // 2. Questions
 
       const storedQuestions =
         localStorage.getItem('MOCK_QUESTIONS');
