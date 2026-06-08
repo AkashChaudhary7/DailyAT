@@ -303,47 +303,6 @@ export default function Dashboard() {
       console.error("Failed to copy all!", err);
     }
   };
-// Firestore Sync
-useEffect(() => {
-  const loadQuestionsFromFirestore = async () => {
-    try {
-      console.log("Loading questions from Firestore...");
-
-      const snapshot = await getDocs(
-        collection(db, "questions")
-      );
-
-      console.log(
-        "Firestore documents:",
-        snapshot.size
-      );
-
-      const firestoreQuestions = snapshot.docs.map(doc => ({
-  ...doc.data(),
-  firestoreId: doc.id
-}));
-
-      setQuestions(firestoreQuestions);
-
-      localStorage.setItem(
-        "MOCK_QUESTIONS",
-        JSON.stringify(firestoreQuestions)
-      );
-
-      console.log(
-        `Loaded ${firestoreQuestions.length} questions`
-      );
-
-    } catch (error) {
-      console.error(
-        "Firestore loading error:",
-        error
-      );
-    }
-  };
-
-  loadQuestionsFromFirestore();
-}, []);
   // Load Database from LocalStorage on mount
   useEffect(() => {
     // 1. Theme Check
@@ -353,6 +312,47 @@ useEffect(() => {
     }
 
     // 2. Questions
+    // 2. Questions
+const loadQuestionsFromFirestore = async () => {
+  try {
+    console.log("Loading questions from Firestore...");
+
+    const snapshot = await getDocs(
+      collection(db, "questions")
+    );
+
+    const firestoreQuestions = snapshot.docs.map(doc => ({
+      ...doc.data(),
+      firestoreId: doc.id
+    }));
+
+    console.log(
+      `Loaded ${firestoreQuestions.length} questions`
+    );
+
+    setQuestions(firestoreQuestions as Question[]);
+
+    localStorage.setItem(
+      "MOCK_QUESTIONS",
+      JSON.stringify(firestoreQuestions)
+    );
+
+  } catch (error) {
+    console.error(
+      "Firestore loading error:",
+      error
+    );
+
+    const storedQuestions =
+      localStorage.getItem("MOCK_QUESTIONS");
+
+    if (storedQuestions) {
+      setQuestions(JSON.parse(storedQuestions));
+    }
+  }
+};
+
+loadQuestionsFromFirestore();
    const storedQuestions =
   localStorage.getItem('MOCK_QUESTIONS');
 
@@ -1738,10 +1738,8 @@ updateProgress(
                   )}
                 </div>
 
-           
-            ) : null}
-
-          
+              </div>
+            ) : null}        
 
       {/* Offline Status footer bar banner */}
       <footer className="border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 mt-20 py-4 text-center text-[11px] text-slate-400 transition-colors select-none">
