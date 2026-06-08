@@ -213,7 +213,6 @@ export default function Dashboard() {
   const [examCounters, setExamCounters] = useState<ExamCounter[]>([
     { id: 'exam-1', name: 'NEET 2026', targetDate: '2026-05-04' },
     { id: 'exam-2', name: 'JEE Main', targetDate: '2026-04-15' },
-    { id: 'exam-3', name: 'Board Exams', targetDate: '2026-02-15' }
   ]);
   
   const [subjectTagsList, setSubjectTagsList] = useState<string[]>(["Rajasthan GK", "HTML Upload", "General Science"]);
