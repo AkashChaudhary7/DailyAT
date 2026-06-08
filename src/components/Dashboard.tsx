@@ -303,27 +303,18 @@ export default function Dashboard() {
       console.error("Failed to copy all!", err);
     }
   };
-
-  // Load Database from LocalStorage on mount
-  useEffect(() => {
-    // 1. Theme Check
-    const storedTheme = localStorage.getItem('THEME_MODE');
-    if (storedTheme === 'dark') {
-      setIsDarkMode(true);
-    }
-
-    // 2. Questions
-    useEffect(() => {
+// Firestore Sync
+useEffect(() => {
   const loadQuestionsFromFirestore = async () => {
     try {
-      console.log('Loading questions from Firestore...');
+      console.log("Loading questions from Firestore...");
 
       const snapshot = await getDocs(
-        collection(db, 'questions')
+        collection(db, "questions")
       );
 
       console.log(
-        'Firestore documents:',
+        "Firestore documents:",
         snapshot.size
       );
 
@@ -335,7 +326,7 @@ export default function Dashboard() {
       setQuestions(firestoreQuestions);
 
       localStorage.setItem(
-        'MOCK_QUESTIONS',
+        "MOCK_QUESTIONS",
         JSON.stringify(firestoreQuestions)
       );
 
@@ -345,21 +336,38 @@ export default function Dashboard() {
 
     } catch (error) {
       console.error(
-        'Firestore loading error:',
+        "Firestore loading error:",
         error
       );
-
-      const storedQuestions =
-        localStorage.getItem('MOCK_QUESTIONS');
-
-      if (storedQuestions) {
-        setQuestions(JSON.parse(storedQuestions));
-      }
     }
   };
 
   loadQuestionsFromFirestore();
 }, []);
+  // Load Database from LocalStorage on mount
+  useEffect(() => {
+    // 1. Theme Check
+    const storedTheme = localStorage.getItem('THEME_MODE');
+    if (storedTheme === 'dark') {
+      setIsDarkMode(true);
+    }
+
+    // 2. Questions
+   const storedQuestions =
+  localStorage.getItem('MOCK_QUESTIONS');
+
+if (
+  storedQuestions &&
+  questions.length === 0
+) {
+  try {
+    setQuestions(
+      JSON.parse(storedQuestions)
+    );
+  } catch (e) {
+    console.error(e);
+  }
+}
 
     // 3. User Name
     const storedName = localStorage.getItem('USER_PROFILE_NAME');
