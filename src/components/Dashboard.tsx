@@ -1046,7 +1046,7 @@ export default function Dashboard() {
                         <select 
                           value={quizSubject}
                           onChange={(e) => setQuizSubject(e.target.value)}
-                          className="w-full bg-slate-50 dark:bg-slate-650 border border-slate-200 dark:border-slate-750 px-4 py-3.5 rounded-xl text-xs font-bold appearance-none outline-none focus:ring-2 focus:ring-indigo-500/20 text-slate-900 dark:text-slate-100"
+                          className="w-full bg-slate-50 dark:bg-slate-650 border border-slate-200 dark:border-slate-750 px-4 py-3.5 rounded-xl text-xs font-bold appearance-none outline-none focus:ring-2 focus:ring-indigo-500/20 text-black-900 dark:text-black-900"
                         >
                           <option className="dark:bg-slate-900 text-black-900 dark:text-slate-100">All Subjects</option>
                           {availableSubjects.map(sub => (
@@ -1064,7 +1064,7 @@ export default function Dashboard() {
                           type="number"
                           value={quizCount}
                           onChange={(e) => setQuizCount(Math.max(1, parseInt(e.target.value) || 0))}
-                          className="w-full bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-750 px-4 py-3 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500/20 text-black-900 dark:text-black-100"
+                          className="w-full bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-750 px-4 py-3 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500/20 text-black-900 dark:text-black-900"
                         />
                       </div>
                       <div>
@@ -1074,7 +1074,7 @@ export default function Dashboard() {
                           value={timerMinutes}
                           max={180}
                           onChange={(e) => setTimerMinutes(Math.min(180, Math.max(1, parseInt(e.target.value) || 0)))}
-                          className="w-full bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-750 px-4 py-3 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500/20 text-black-900 dark:text-black-100"
+                          className="w-full bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-750 px-4 py-3 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500/20 text-black-900 dark:text-black-900"
                           disabled={!hasTimer}
                         />
                       </div>
