@@ -1,0 +1,56 @@
+{
+  "entities": {
+    "Question": {
+      "title": "Question",
+      "description": "A single question from the question bank.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "text": { "type": "string" },
+        "options": { "type": "array" },
+        "correctAnswer": { "type": "string" },
+        "topic": { "type": "string" },
+        "difficulty": { "type": "string" }
+      },
+      "required": ["id", "text", "correctAnswer"]
+    },
+    "MockTest": {
+      "title": "Mock Test",
+      "description": "A collection of questions for a mock test.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "questions": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "title", "questions"]
+    },
+    "Attempt": {
+      "title": "Attempt",
+      "description": "A user attempt at a mock test.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "mockTestId": { "type": "string" },
+        "score": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "mockTestId"]
+    }
+  },
+  "firestore": {
+    "questions": {
+      "schema": "Question",
+      "description": "The global pool of questions."
+    },
+    "mockTests": {
+      "schema": "MockTest",
+      "description": "Generated mock tests."
+    },
+    "attempts": {
+      "schema": "Attempt",
+      "description": "User attempts at mock tests."
+    }
+  }
+}

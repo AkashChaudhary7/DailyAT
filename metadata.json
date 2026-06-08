@@ -1,0 +1,8 @@
+{
+  "name": "Remix: Remix: Mock Test Generator \u0026 Question Manager",
+  "description": "Upload HTML files to extract questions, manage your custom question bank, generate custom mock tests, track real-time analytics, and practice offline.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
