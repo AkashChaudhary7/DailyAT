@@ -204,8 +204,8 @@ export default function MockTestInterface({
           <div className="h-5 w-px bg-slate-200 dark:bg-slate-800 hidden sm:block"></div>
           
           <div>
-            <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-black tracking-widest uppercase font-display">{settings.subject} PRACTICE MOCK</span>
-            <h2 className="text-xs sm:text-sm font-black truncate max-w-[170px] sm:max-w-xs font-display text-slate-700 dark:text-slate-300 uppercase tracking-wide">{settings.questionCount} Questions Challenge</h2>
+            <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-black tracking-widest uppercase font-display">{settings.subject} Test </span>
+            <h2 className="text-xs sm:text-sm font-black truncate max-w-[170px] sm:max-w-xs font-display text-slate-700 dark:text-slate-300 uppercase tracking-wide">{settings.questionCount} Questions </h2>
           </div>
         </div>
 
@@ -231,7 +231,7 @@ export default function MockTestInterface({
 
           <button
             onClick={() => setIsConfirmSubmitOpen(true)}
-            className="flex h-10 items-center rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white px-5 text-xs font-black uppercase tracking-widest shadow hover:scale-102 active:scale-98 transition-all cursor-pointer font-display"
+            className="flex h-10 items-center rounded-xl bg-emerald-600 hover:bg-emerald-600 text-white px-5 text-xs font-black uppercase tracking-widest shadow hover:scale-102 active:scale-98 transition-all cursor-pointer font-display"
           >
             Submit Test
           </button>
