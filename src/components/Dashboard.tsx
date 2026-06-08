@@ -1161,14 +1161,14 @@ export default function Dashboard() {
 
 
 
-                {/* AT MOCK Simulator banner - refined and small */}
+                {/* MOCK Simulator banner - refined and small */}
                 <div className="relative rounded-2xl bg-gradient-to-r from-indigo-700 via-indigo-600 to-indigo-850 p-6 text-white overflow-hidden shadow-xl shadow-indigo-550/20 border border-indigo-500/10">
                   <div className="absolute top-0 right-0 transform translate-x-3 -translate-y-3 shrink-0 opacity-10">
                     <Sparkles className="h-14 w-14 text-white" />
                   </div>
                   <div className="flex items-center space-x-3">
                     <Zap className="h-4 w-4 text-emerald-300 animate-pulse" />
-                    <span className="text-[11px] font-black tracking-[0.2em] uppercase font-display">AT MOCK Simulator Ready</span>
+                    <span className="text-[11px] font-black tracking-[0.2em] uppercase font-display"> MOCK Simulator Ready</span>
                   </div>
                 </div>
 
@@ -1779,7 +1779,7 @@ export default function Dashboard() {
       {/* Offline Status footer bar banner */}
       <footer className="border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 mt-20 py-4 text-center text-[11px] text-slate-400 transition-colors select-none">
         <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-3 font-mono">
-          <span>&copy; 2026 AT MOCK. All assessments computed within your browser memory.</span>
+          <span>&copy; Made by Akash Chaudhary for his Beautiful Wife , Trishna </span>
           <span className="flex items-center space-x-1 border border-slate-200 dark:border-slate-800 rounded px-2.5 py-0.5 bg-slate-50 dark:bg-slate-950 font-bold text-[10px]">
             <Check className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
             <span>100% Cloud Synchronized Practice Ready</span>
