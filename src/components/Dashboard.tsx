@@ -4,7 +4,11 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { addDoc, collection } from 'firebase/firestore';
+import {
+  addDoc,
+  collection,
+  getDocs
+} from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { parseUniversalHTML } from '../lib/htmlParser';
 import { SAMPLE_QUESTIONS, INITIAL_LEADERBOARD, SAMPLE_ATTEMPTS } from '../utils/sampleData';
@@ -309,17 +313,53 @@ export default function Dashboard() {
     }
 
     // 2. Questions
-    const storedQ = localStorage.getItem('MOCK_QUESTIONS');
-    if (storedQ) {
-      try {
-        setQuestions(JSON.parse(storedQ));
-      } catch (e) {
-        setQuestions(SAMPLE_QUESTIONS);
+    useEffect(() => {
+  const loadQuestionsFromFirestore = async () => {
+    try {
+      console.log('Loading questions from Firestore...');
+
+      const snapshot = await getDocs(
+        collection(db, 'questions')
+      );
+
+      console.log(
+        'Firestore documents:',
+        snapshot.size
+      );
+
+      const firestoreQuestions = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+
+      setQuestions(firestoreQuestions);
+
+      localStorage.setItem(
+        'MOCK_QUESTIONS',
+        JSON.stringify(firestoreQuestions)
+      );
+
+      console.log(
+        `Loaded ${firestoreQuestions.length} questions`
+      );
+
+    } catch (error) {
+      console.error(
+        'Firestore loading error:',
+        error
+      );
+
+      const storedQuestions =
+        localStorage.getItem('MOCK_QUESTIONS');
+
+      if (storedQuestions) {
+        setQuestions(JSON.parse(storedQuestions));
       }
-    } else {
-      setQuestions(SAMPLE_QUESTIONS);
-      localStorage.setItem('MOCK_QUESTIONS', JSON.stringify(SAMPLE_QUESTIONS));
     }
+  };
+
+  loadQuestionsFromFirestore();
+}, []);
 
     // 3. User Name
     const storedName = localStorage.getItem('USER_PROFILE_NAME');
