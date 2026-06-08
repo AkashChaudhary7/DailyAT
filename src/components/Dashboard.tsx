@@ -4,7 +4,11 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { addDoc, collection } from 'firebase/firestore';
+import {
+  addDoc,
+  collection,
+  getDocs
+} from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { parseUniversalHTML } from '../lib/htmlParser';
 import { SAMPLE_QUESTIONS, INITIAL_LEADERBOARD, SAMPLE_ATTEMPTS } from '../utils/sampleData';
@@ -218,9 +222,9 @@ export default function Dashboard() {
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [stagedQuestions, setStagedQuestions] = useState<Question[]>([]);
   const [examCounters, setExamCounters] = useState<ExamCounter[]>([
-    { id: 'exam-1', name: 'NEET 2026', targetDate: '2026-05-04' },
-    { id: 'exam-2', name: 'JEE Main', targetDate: '2026-04-15' },
-    { id: 'exam-3', name: 'Board Exams', targetDate: '2026-02-15' }
+        { id: 'exam-1', name: 'CET 2026', targetDate: '2026-05-04' },
+    { id: 'exam-2', name: 'RAS PRE', targetDate: '2026-04-15' },
+    { id: 'exam-3', name: 'DSSSB', targetDate: '2026-02-15' }
   ]);
   const [stagingSubject, setStagingSubject] = useState<string>("HTML Upload");
   const [uploadError, setUploadError] = useState<string>("");
@@ -309,6 +313,52 @@ export default function Dashboard() {
     }
 
     // 2. Questions
+  const loadQuestionsFromFirestore = async () => {
+    try {
+      console.log('Loading questions from Firestore...');
+
+      const snapshot = await getDocs(
+        collection(db, 'questions')
+      );
+
+      console.log(
+        'Firestore documents:',
+        snapshot.size
+      );
+
+      const firestoreQuestions = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+
+      setQuestions(firestoreQuestions);
+
+      localStorage.setItem(
+        'MOCK_QUESTIONS',
+        JSON.stringify(firestoreQuestions)
+      );
+
+      console.log(
+        `Loaded ${firestoreQuestions.length} questions`
+      );
+
+    } catch (error) {
+      console.error(
+        'Firestore loading error:',
+        error
+      );
+
+      const storedQuestions =
+        localStorage.getItem('MOCK_QUESTIONS');
+
+      if (storedQuestions) {
+        setQuestions(JSON.parse(storedQuestions));
+      }
+    }
+  };
+
+  loadQuestionsFromFirestore();
+}, []);
     const storedQ = localStorage.getItem('MOCK_QUESTIONS');
     if (storedQ) {
       try {
