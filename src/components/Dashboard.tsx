@@ -861,4 +861,929 @@ export default function Dashboard() {
 
                 {/* Submetrics columns */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-                  <div className="p-
+                  <div className="p-3 border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-850/30 rounded-xl">
+                    <span className="text-[10px] text-slate-400 block tracking-wide font-medium uppercase">Correct Answers</span>
+                    <span className="text-sm font-extrabold text-emerald-500">{reviewedAttempt.correctCount} / {reviewedAttempt.totalQuestions}</span>
+                  </div>
+                  <div className="p-3 border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-850/30 rounded-xl">
+                    <span className="text-[10px] text-slate-400 block tracking-wide font-medium uppercase">Incorrect Attempts</span>
+                    <span className="text-sm font-extrabold text-red-500">{reviewedAttempt.incorrectCount} / {reviewedAttempt.totalQuestions}</span>
+                  </div>
+                  <div className="p-3 border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-850/30 rounded-xl">
+                    <span className="text-[10px] text-slate-400 block tracking-wide font-medium uppercase">Skipped / Unvisited</span>
+                    <span className="text-sm font-extrabold text-slate-400">{reviewedAttempt.unattemptedCount}</span>
+                  </div>
+                  <div className="p-3 border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-850/30 rounded-xl">
+                    <span className="text-[10px] text-slate-400 block tracking-wide font-medium uppercase">Time Consumed</span>
+                    <span className="text-sm font-extrabold text-rose-500">{Math.floor(reviewedAttempt.timeTaken / 60)}m {reviewedAttempt.timeTaken % 60}s</span>
+                  </div>
+                </div>
+
+                {/* Question-by-Question Diagnostics */}
+                <h4 className="text-xs font-bold text-slate-400 border-b border-slate-100 dark:border-slate-850 pb-2 mb-4 tracking-wider uppercase">Question-by-Question Diagnostic Review</h4>
+                
+                {reviewedAttempt.answers.length === 0 ? (
+                  <div className="text-center p-8 border rounded-xl border-dashed">
+                    <AlertCircle className="h-8 w-8 text-slate-400 mx-auto mb-2" />
+                    <span className="text-xs text-slate-500 font-medium">Question review sheets are generated on active test submissions.</span>
+                  </div>
+                ) : (
+                  <div className="space-y-6">
+                    {reviewedAttempt.answers.map((ans, idx) => {
+                      const qProfile = questions.find(item => item.id === ans.questionId);
+                      if (!qProfile) return null;
+
+                      const letters = ['A', 'B', 'C', 'D'];
+
+                      return (
+                        <div 
+                          key={idx}
+                          className={`p-4 sm:p-5 rounded-xl border transition-all ${
+                            ans.selectedIndex === null ? 'border-slate-200 dark:border-slate-800 bg-amber-500/5' : 
+                            ans.isCorrect ? 'border-emerald-200 dark:border-emerald-950/40 bg-emerald-500/5' : 
+                            'border-red-200 dark:border-red-950/40 bg-red-500/5'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between mb-3 text-xs">
+                            <span className="font-bold text-rose-400 text-[10px]">QUESTION #{idx + 1}</span>
+                            <span className={`font-semibold rounded-full px-2 py-0.5 text-[9px] uppercase tracking-wide ${
+                              ans.selectedIndex === null ? 'bg-amber-100 text-amber-700 dark:bg-amber-955 dark:text-amber-300' : 
+                              ans.isCorrect ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-955' : 
+                              'bg-red-100 text-red-700 dark:bg-red-955'
+                            }`}>
+                              {ans.selectedIndex === null ? 'Skipped' : ans.isCorrect ? 'Correct Option Selected' : 'Incorrect Choice'}
+                            </span>
+                          </div>
+
+                          <div className="mb-3">
+                            <FormattedText text={qProfile.questionText} className="text-sm font-semibold leading-relaxed" />
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-4">
+                            {qProfile.options.map((opt, optIdx) => {
+                              const isCorrect = qProfile.correctAnswerIndex === optIdx;
+                              const isUserSelected = ans.selectedIndex === optIdx;
+                              
+                              let optClass = 'border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-850/50';
+                              if (isCorrect) {
+                                optClass = 'border-emerald-500 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold';
+                              } else if (isUserSelected) {
+                                optClass = 'border-red-500 bg-red-500/10 text-red-600 dark:text-red-400 font-bold';
+                              }
+
+                              return (
+                                <div key={optIdx} className={`text-xs p-2.5 rounded-lg border flex items-center space-x-2 ${optClass}`}>
+                                  <span className={`h-5 w-5 rounded flex items-center justify-center text-[10px] font-bold shrink-0 border ${
+                                    isCorrect ? 'bg-emerald-600 text-white border-emerald-600' :
+                                    isUserSelected ? 'bg-red-600 text-white border-red-600' : 'bg-white dark:bg-slate-700'
+                                  }`}>
+                                    {letters[optIdx]}
+                                  </span>
+                                  <div className="truncate flex-1">
+                                    <FormattedText text={opt} />
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+
+                          {qProfile.explanation && (
+                            <div className="p-3 bg-slate-100 dark:bg-slate-800 rounded-lg text-xs leading-relaxed border border-slate-200 dark:border-slate-700">
+                              <span className="font-bold text-rose-500 block mb-1 uppercase tracking-wider text-[9px]">DIAGNOSTIC EXPLANATION:</span>
+                              <p className="font-medium text-slate-500 dark:text-slate-300">{qProfile.explanation}</p>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            ) : null}
+
+            {activeTab === 'mock-config' && !reviewedAttempt ? (
+              <div className="space-y-6">
+                <div>
+                  <h4 className="text-[10px] font-black text-slate-400 dark:text-slate-500 tracking-[0.2em] uppercase mb-2 ml-1 font-display">Target Exam Countdowns</h4>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    {examCounters.map(counter => (
+                      <ExamCounterCard 
+                        key={counter.id} 
+                        counter={counter} 
+                        onUpdate={handleUpdateExamCounter} 
+                      />
+                    ))}
+                  </div>
+                </div>
+
+                <DailyGoalCard goal={dailyGoal} onUpdateTarget={handleUpdateDailyBaseTarget} />
+
+                <div className="grid grid-cols-3 gap-3 animate-fade-in shadow-sm">
+                  <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-3 rounded-xl">
+                    <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 leading-none truncate">Questions</div>
+                    <div className="text-lg font-black text-indigo-600 dark:text-indigo-400 font-display leading-none">{questions.length}</div>
+                  </div>
+                  <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-3 rounded-xl">
+                    <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 leading-none truncate">Mocks Given</div>
+                    <div className="text-lg font-black text-rose-500 font-display leading-none">{attempts.length}</div>
+                  </div>
+                  <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-3 rounded-xl">
+                    <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 leading-none truncate">Accuracy</div>
+                    <div className="text-lg font-black text-emerald-500 font-display leading-none">{avgAccuracy}%</div>
+                  </div>
+                </div>
+
+                <div className="relative rounded-2xl bg-gradient-to-r from-indigo-700 via-indigo-600 to-indigo-850 p-6 text-white overflow-hidden shadow-xl shadow-indigo-550/20 border border-indigo-500/10">
+                  <div className="absolute top-0 right-0 transform translate-x-3 -translate-y-3 shrink-0 opacity-10">
+                    <Sparkles className="h-14 w-14 text-white" />
+                  </div>
+                  <div className="flex items-center space-x-3">
+                    <Zap className="h-4 w-4 text-emerald-300 animate-pulse" />
+                    <span className="text-[11px] font-black tracking-[0.2em] uppercase font-display"> MOCK Simulator Ready</span>
+                  </div>
+                </div>
+
+                <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] p-8 shadow-xl shadow-indigo-105/30 border border-indigo-50 dark:border-slate-800/80 flex flex-col justify-between transition-all">
+                  <div className="flex justify-between items-start mb-6 border-b border-slate-100 dark:border-slate-800/50 pb-4">
+                    <div>
+                      <h3 className="text-xl font-black tracking-tight font-display">Launch New Mock Test</h3>
+                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Configure real-time assessment parameters</p>
+                    </div>
+                    <div className="bg-indigo-50 dark:bg-indigo-950/40 p-2 rounded-xl border border-indigo-100 dark:border-indigo-900">
+                      <Settings className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    <div className="space-y-6">
+                      <div>
+                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2.5 ml-1">Practice Subject</label>
+                        <div className="relative">
+                          <select 
+                            value={quizSubject}
+                            onChange={(e) => setQuizSubject(e.target.value)}
+                            className="w-full bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-750 px-4 py-3.5 rounded-2xl text-xs font-bold appearance-none outline-none focus:ring-2 focus:ring-indigo-500/20"
+                          >
+                            <option>All Subjects</option>
+                            {availableSubjects.map(sub => (
+                              <option key={sub} value={sub}>{sub}</option>
+                            ))}
+                          </select>
+                          <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2.5 ml-1">Question Count</label>
+                          <input 
+                            type="number"
+                            value={quizCount}
+                            onChange={(e) => setQuizCount(Math.max(1, parseInt(e.target.value) || 0))}
+                            className="w-full bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-750 px-4 py-3.5 rounded-2xl text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500/20"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2.5 ml-1">Time (Minutes)</label>
+                          <input 
+                            type="number"
+                            value={timerMinutes}
+                            max={180}
+                            onChange={(e) => setTimerMinutes(Math.min(180, Math.max(1, parseInt(e.target.value) || 0)))}
+                            className="w-full bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-750 px-4 py-3.5 rounded-2xl text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500/20"
+                            disabled={!hasTimer}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row gap-4 mt-8 pt-6 border-t border-slate-100 dark:border-slate-800">
+                    <button
+                      onClick={handlePrepareQuiz}
+                      disabled={questions.length === 0}
+                      className={`flex-grow py-4 rounded-2xl font-black text-sm shadow-lg active:scale-95 transition-transform flex items-center justify-center space-x-2 font-display uppercase tracking-widest cursor-pointer ${
+                        questions.length === 0
+                          ? 'bg-slate-200 dark:bg-slate-800 text-slate-400 cursor-not-allowed shadow-none'
+                          : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-200 shadow-xl dark:shadow-none'
+                      }`}
+                    >
+                      <Check className="h-5 w-5" />
+                      <span>START FULL-SCREEN QUIZ</span>
+                    </button>
+                    <button 
+                      onClick={() => {
+                        setHasTimer(false);
+                        handlePrepareQuiz();
+                      }}
+                      className="px-8 py-4 bg-slate-100 dark:bg-slate-850 hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-350 cursor-pointer rounded-2xl font-bold transition-colors text-sm"
+                    >
+                      Untimed Practice Mode
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            {activeTab === 'review-bank' && (
+              <div className="space-y-6 animate-fade-in">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <h2 className="text-2xl font-black tracking-tight font-display text-indigo-900 dark:text-indigo-400">Review Question Bank</h2>
+                    <p className="text-xs text-slate-400 font-medium mt-1">Questions you bookmarked or answered incorrectly in past mocks.</p>
+                  </div>
+                  
+                  <button
+                    onClick={() => {
+                      const reviewList = questions.filter(q => q.isBookmarked || q.needsReview);
+                      if (reviewList.length === 0) {
+                        alert("No questions in review bank yet!");
+                        return;
+                      }
+                      const count = Math.min(reviewList.length, 20);
+                      const selected = [...reviewList].sort(() => 0.5 - Math.random()).slice(0, count);
+                      setActiveQuizQuestions(selected);
+                      setActiveQuizSettings({
+                        questionCount: selected.length,
+                        subject: "Review Mock",
+                        hasTimer: true,
+                        durationMinutes: Math.ceil(selected.length * 1.5)
+                      });
+                    }}
+                    className="flex items-center justify-center space-x-2 bg-rose-600 text-white font-black text-xs py-3.5 px-6 rounded-2xl shadow-lg shadow-rose-100 dark:shadow-none hover:bg-rose-700 transition active:scale-95"
+                  >
+                    <Zap className="w-4 h-4" />
+                    <span>START REVIEW MOCK (MAX 20)</span>
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4">
+                  {questions.filter(q => q.isBookmarked || q.needsReview).length === 0 ? (
+                    <div className="bg-white dark:bg-slate-900 border-2 border-dashed border-slate-200 dark:border-slate-800 p-12 text-center rounded-[2.5rem]">
+                      <Sparkles className="h-12 w-12 text-slate-200 dark:text-slate-800 mx-auto mb-4" />
+                      <h3 className="text-lg font-black text-slate-400">Your review bank is empty</h3>
+                      <p className="text-xs text-slate-400 mt-2">Finish a mock test or bookmark questions to see them here.</p>
+                    </div>
+                  ) : (
+                    questions.filter(q => q.isBookmarked || q.needsReview).map(q => (
+                      <div key={q.id} className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-6 rounded-3xl group relative overflow-hidden transition-all hover:shadow-md">
+                        <div className="absolute top-0 right-0 p-4 flex space-x-2">
+                           {q.needsReview && (
+                            <span className="bg-rose-500/10 text-rose-500 text-[9px] font-black px-2 py-1 rounded-full uppercase tracking-wider border border-rose-500/20">Review Tag</span>
+                           )}
+                           <button 
+                             onClick={() => toggleBookmark(q.id)}
+                             className={`h-8 w-8 rounded-xl flex items-center justify-center transition-all ${
+                               q.isBookmarked ? 'bg-amber-100 text-amber-600 border border-amber-200' : 'bg-slate-50 dark:bg-slate-850 text-slate-400 border border-slate-200 dark:border-slate-750'
+                             }`}
+                           >
+                            <Check className={`h-4 w-4 ${q.isBookmarked ? 'opacity-100' : 'opacity-30'}`} />
+                           </button>
+                        </div>
+                        
+                        <div className="pr-12">
+                          <div className="flex items-center space-x-2 mb-3">
+                            <span className="text-[10px] bg-slate-100 dark:bg-slate-800 text-slate-500 font-black px-2 py-0.5 rounded-lg uppercase tracking-tight">{q.subject}</span>
+                            {q.topic && <span className="text-[10px] text-slate-400 font-medium">#{q.topic}</span>}
+                          </div>
+                          <div className="mb-4">
+                            <FormattedText text={q.questionText} className="text-sm font-bold leading-relaxed pr-8" />
+                          </div>
+                          
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-4">
+                            {q.options.map((opt, idx) => (
+                              <div key={idx} className={`p-2.5 rounded-xl text-xs border flex items-start space-x-2 ${
+                                idx === q.correctAnswerIndex ? 'bg-emerald-500/5 border-emerald-500/20 text-emerald-600 font-bold' : 'bg-slate-50 dark:bg-slate-850 border-slate-100 dark:border-slate-800 text-slate-500'
+                              }`}>
+                                <span className="opacity-50 shrink-0">{String.fromCharCode(65 + idx)}.</span>
+                                <FormattedText text={opt} className="inline-block" />
+                              </div>
+                            ))}
+                          </div>
+                          
+                          {q.explanation && (
+                            <div className="mt-4 p-3 bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-100 dark:border-indigo-900/50 rounded-2xl">
+                              <span className="text-[9px] font-black text-indigo-500 uppercase tracking-widest block mb-1">Explanation</span>
+                              <FormattedText text={q.explanation} className="text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed" />
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'questions' && !reviewedAttempt ? (
+              <div className="space-y-6">
+                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-6 shadow-sm transition-colors">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div>
+                      <h4 className="text-sm font-bold tracking-tight">Question Bank Database Console</h4>
+                      <p className="text-[11px] text-slate-400 mt-0.5">Edit, add, or delete single questions in your database.</p>
+                    </div>
+
+                    <button
+                      onClick={() => setIsFormOpen(!isFormOpen)}
+                      className="flex h-10 items-center justify-center space-x-1 px-4 text-xs font-semibold bg-rose-600 hover:bg-rose-700 text-white rounded-xl shadow cursor-pointer transition-all shrink-0"
+                    >
+                      <Plus className="h-4 w-4" />
+                      <span>Create Single MCQ Manually</span>
+                    </button>
+                  </div>
+
+                  {isFormOpen && (
+                    <form onSubmit={handleCreateManualQuestion} className="mt-5 border-t border-slate-100 dark:border-slate-800 pt-5 space-y-4 animate-fade-in">
+                      <h5 className="text-xs font-extrabold text-rose-500 uppercase">MCQ Generator Wizard</h5>
+                      
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <label className="text-xs font-bold text-slate-400 block mb-1.5">Question Subject Group</label>
+                          <input
+                            type="text"
+                            value={newSubject}
+                            onChange={(e) => setNewSubject(e.target.value)}
+                            placeholder="e.g. Mathematics, Programming..."
+                            className="w-full text-xs font-semibold h-10 border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 rounded-xl px-3 outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs font-bold text-slate-400 block mb-1.5">Correct Option Choice</label>
+                          <select
+                            value={newCorrectIndex}
+                            onChange={(e) => setNewCorrectIndex(parseInt(e.target.value) || 0)}
+                            className="w-full text-xs font-semibold h-10 border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 rounded-xl px-3 outline-none"
+                          >
+                            <option value="0">Option A is Correct Answer</option>
+                            <option value="1">Option B is Correct Answer</option>
+                            <option value="2">Option C is Correct Answer</option>
+                            <option value="3">Option D is Correct Answer</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="text-xs font-bold text-slate-400 block mb-1.5">Question Text / Statement</label>
+                        <textarea
+                          rows={2}
+                          value={newQText}
+                          onChange={(e) => setNewQText(e.target.value)}
+                          placeholder="Type your question statement here..."
+                          className="w-full text-xs font-semibold p-2.5 bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-700 rounded-xl outline-none resize-none"
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {newOptions.map((opt, idx) => (
+                          <div key={idx}>
+                            <label className="text-xs font-bold text-slate-400 block mb-1">{String.fromCharCode(65 + idx)} option label</label>
+                            <input
+                              type="text"
+                              value={opt}
+                              onChange={(e) => {
+                                const next = [...newOptions];
+                                next[idx] = e.target.value;
+                                setNewOptions(next);
+                              }}
+                              placeholder={`Option label ${String.fromCharCode(65 + idx)}...`}
+                              className="w-full text-xs font-semibold h-9 border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 rounded-xl px-3 outline-none"
+                            />
+                          </div>
+                        ))}
+                      </div>
+
+                      <div>
+                        <label className="text-xs font-bold text-slate-400 block mb-1">Step explanation (Optional)</label>
+                        <input
+                          type="text"
+                          value={newExplanation}
+                          onChange={(e) => setNewExplanation(e.target.value)}
+                          placeholder="Provide descriptive reasoning or solutions steps..."
+                          className="w-full text-xs font-semibold h-9 border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 rounded-xl px-3 outline-none"
+                        />
+                      </div>
+
+                      <div className="flex items-center justify-end space-x-2 pt-2">
+                        <button
+                          type="button"
+                          onClick={() => setIsFormOpen(false)}
+                          className="h-9 px-4 border border-slate-200 dark:border-slate-700 text-xs font-semibold rounded-lg hover:bg-slate-50"
+                        >
+                          Discard
+                        </button>
+                        <button
+                          type="submit"
+                          className="h-9 px-5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold rounded-lg shadow cursor-pointer"
+                        >
+                          Save Question
+                        </button>
+                      </div>
+                    </form>
+                  )}
+                </div>
+
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-4 card-row">
+                  <div className="relative flex-1 w-full">
+                    <Search className="absolute left-3 top-3.5 h-3.5 w-3.5 text-slate-400 shrink-0" />
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder="Search questions by key text description..."
+                      className="w-full text-xs font-semibold h-10 pl-9 pr-3 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 rounded-xl outline-none"
+                    />
+                  </div>
+
+                  <div className="flex items-center space-x-2 w-full sm:w-auto">
+                    <span className="text-xs font-bold text-slate-400 uppercase shrink-0">Filter:</span>
+                    <select
+                      value={filterSubject}
+                      onChange={(e) => setFilterSubject(e.target.value)}
+                      className="w-full sm:w-44 text-xs font-semibold h-10 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 rounded-xl px-3 outline-none"
+                    >
+                      <option value="All">All Subjects</option>
+                      {availableSubjects.map((sub, idx) => (
+                        <option key={idx} value={sub}>{sub}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {filteredQuestions.length === 0 ? (
+                  <div className="text-center p-12 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl">
+                    <AlertCircle className="h-10 w-10 text-slate-400 mx-auto mb-3 shrink-0" />
+                    <p className="text-xs font-bold text-slate-500">No matching questions in database.</p>
+                    <p className="text-[11px] text-slate-400 mt-1">Clear your searching tags or upload some HTML sheets to populate.</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {filteredQuestions.map((q) => {
+                      const letters = ['A', 'B', 'C', 'D'];
+                      return (
+                        <div 
+                          key={q.id}
+                          className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 sm:p-5 rounded-2xl flex flex-col justify-between hover:border-slate-300 dark:hover:border-slate-705 shadow-sm transition-all"
+                        >
+                          <div>
+                            <div className="flex items-center justify-between mb-3.5">
+                              <span className="text-[9px] font-bold text-rose-500 bg-rose-500/10 px-2 rounded-md py-0.5 uppercase tracking-wider">{q.subject}</span>
+                              <div className="flex items-center space-x-2">
+                                <button
+                                  onClick={() => toggleBookmark(q.id)}
+                                  className={`p-1.5 rounded-md transition-all ${
+                                    q.isBookmarked ? 'bg-amber-100 text-amber-600 border border-amber-200' : 'text-slate-400 hover:text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-950/20'
+                                  }`}
+                                  title="Bookmark for review"
+                                >
+                                  <Bookmark className={`h-3.5 w-3.5 ${q.isBookmarked ? 'fill-current' : ''}`} />
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteFromBank(q.id)}
+                                  className="text-slate-450 hover:text-red-500 p-1.5 rounded-md hover:bg-rose-50 dark:hover:bg-rose-950/20 transition cursor-pointer"
+                                  title="Remove question"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5 hover:scale-110 active:scale-95" />
+                                </button>
+                              </div>
+                            </div>
+
+                            <div className="mb-4">
+                              <FormattedText text={q.questionText} className="text-xs font-bold text-slate-850 dark:text-slate-150 leading-relaxed" />
+                            </div>
+
+                            <div className="space-y-1.5 mb-4">
+                              {q.options.map((opt, oIdx) => (
+                                <div 
+                                  key={oIdx} 
+                                  className={`text-[11px] p-2 rounded-lg border flex items-center space-x-1.5 ${
+                                    oIdx === q.correctAnswerIndex ? 'border-emerald-250 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400 font-semibold' : 'border-slate-100 dark:border-slate-850 bg-slate-50/50 dark:bg-slate-900/30 text-slate-500 dark:text-slate-400'
+                                  }`}
+                                >
+                                  <span className={`h-4.5 w-4.5 text-[9px] shrink-0 rounded flex items-center justify-center font-bold ${
+                                    oIdx === q.correctAnswerIndex ? 'bg-emerald-600 text-white' : 'bg-slate-200 dark:bg-slate-700'
+                                  }`}>
+                                    {letters[oIdx]}
+                                  </span>
+                                  <div className="truncate flex-1">
+                                    <FormattedText text={opt} />
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+
+                          {q.explanation && (
+                            <div className="p-3 bg-slate-100/50 dark:bg-slate-800/40 rounded-xl text-[10px] text-slate-500 dark:text-slate-400 mt-2 border border-slate-150/40 dark:border-slate-850/40 leading-relaxed">
+                              <strong>Step Explanation:</strong> <FormattedText text={q.explanation} className="inline" />
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            ) : null}
+
+            {/* TAB 4: Analytics page */}
+            {activeTab === 'analytics' && !reviewedAttempt ? (
+              <div className="space-y-6">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                  <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4.5 rounded-2xl shadow-sm text-center">
+                    <span className="text-[10px] text-slate-400 block font-bold tracking-widest uppercase">Total Mock attempts</span>
+                    <span className="text-xl font-extrabold mt-1 block">{totalTests} Trials</span>
+                  </div>
+                  <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4.5 rounded-2xl shadow-sm text-center">
+                    <span className="text-[10px] text-slate-400 block font-bold tracking-widest uppercase">Average Accuracy</span>
+                    <span className="text-xl font-extrabold text-emerald-500 mt-1 block">{avgAccuracy}% Ratio</span>
+                  </div>
+                  <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4.5 rounded-2xl shadow-sm text-center">
+                    <span className="text-[10px] text-slate-400 block font-bold tracking-widest uppercase">Questions Solved</span>
+                    <span className="text-xl font-extrabold text-rose-500 mt-1 block">{correctAccumulated} MCQs</span>
+                  </div>
+                  <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4.5 rounded-2xl shadow-sm text-center">
+                    <span className="text-[10px] text-slate-400 block font-bold tracking-widest uppercase">Average Speed</span>
+                    <span className="text-xl font-extrabold mt-1 block">{avgSpeedSec}s / Q</span>
+                  </div>
+                </div>
+
+                {attempts.length === 0 ? (
+                  <div className="text-center p-12 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl">
+                    <Activity className="h-10 w-10 text-slate-400 mx-auto mb-3 shrink-0" />
+                    <p className="text-xs font-bold text-slate-500">No chart data gathered yet.</p>
+                    <p className="text-[11px] text-slate-400 mt-1">Submit your first mock practice challenge to generate history logs.</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 rounded-2xl shadow-sm">
+                      <h4 className="text-xs font-bold text-slate-450 tracking-wider uppercase mb-4">Exam Score Trend Over Time</h4>
+                      <div className="h-60 w-full text-xs">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <LineChart data={getScoreChartData()} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? '#334155' : '#f1f5f9'} />
+                            <XAxis dataKey="name" stroke={isDarkMode ? '#94a3b8' : '#64748b'} />
+                            <YAxis domain={[0, 100]} stroke={isDarkMode ? '#94a3b8' : '#64748b'} />
+                            <Tooltip contentStyle={{ backgroundColor: isDarkMode ? '#1e293b' : '#ffffff', borderColor: '#e2e8f0', borderRadius: '12px' }} />
+                            <Line type="monotone" dataKey="score" stroke="#f43f5e" strokeWidth={3} activeDot={{ r: 8 }} />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+
+                    <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 rounded-2xl shadow-sm">
+                      <h4 className="text-xs font-bold text-slate-450 tracking-wider uppercase mb-4">Accuracy breakdown by Subject (%)</h4>
+                      <div className="h-60 w-full text-xs">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart data={getSubjectAccuracyChartData()} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke={isDarkMode ? '#334155' : '#f1f5f9'} />
+                            <XAxis dataKey="subject" stroke={isDarkMode ? '#94a3b8' : '#64748b'} />
+                            <YAxis domain={[0, 100]} stroke={isDarkMode ? '#94a3b8' : '#64748b'} />
+                            <Tooltip contentStyle={{ backgroundColor: isDarkMode ? '#1e293b' : '#ffffff', borderColor: '#e2e8f0', borderRadius: '12px' }} />
+                            <Bar dataKey="accuracy" fill="#10b981" radius={[8, 8, 0, 0]} barSize={34} />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 sm:p-6 shadow-sm overflow-hidden transition-colors">
+                  <h4 className="text-xs font-extrabold text-slate-400 mb-4 tracking-wider uppercase">Historical Mock Exam Journals</h4>
+                  {attempts.length === 0 ? (
+                    <div className="text-xs p-5 text-center text-slate-450">No historical exam registers found.</div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-xs border-collapse">
+                        <thead>
+                          <tr className="border-b border-slate-100 dark:border-slate-800 text-slate-400 font-bold select-none">
+                            <th className="py-3 px-2">Assigned Subject</th>
+                            <th className="py-3 px-2">Test Date</th>
+                            <th className="py-3 px-2 text-center">Score Ratio</th>
+                            <th className="py-3 px-2 text-center">Diagnostics</th>
+                            <th className="py-3 px-2 text-right">Action Links</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-50 dark:divide-slate-850 font-medium">
+                          {attempts.map((att) => {
+                            const dateObj = new Date(att.date);
+                            return (
+                              <tr key={att.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-850/20 transition-all">
+                                <td className="py-3 px-2 font-bold">{att.subject}</td>
+                                <td className="py-3 px-2 text-slate-450">{dateObj.toLocaleDateString()} {dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
+                                <td className="py-3 px-2 text-center">
+                                  <span className={`px-2 py-0.5 rounded-full font-bold font-mono ${
+                                    att.scorePercentage >= 80 ? 'bg-emerald-500/10 text-emerald-500' :
+                                    att.scorePercentage >= 50 ? 'bg-amber-500/10 text-amber-500' : 'bg-red-500/10 text-red-500'
+                                  }`}>
+                                    {att.scorePercentage}%
+                                  </span>
+                                </td>
+                                <td className="py-3 px-2 text-center text-[11px] font-mono text-slate-400">
+                                  {att.correctCount} Right | {att.incorrectCount} Wrong
+                                </td>
+                                <td className="py-3 px-2 text-right">
+                                  <button
+                                    onClick={() => { setReviewedAttempt(att); setActiveTab('review'); }}
+                                    className="text-rose-500 hover:text-rose-600 font-bold hover:underline inline-flex items-center space-x-0.5 group cursor-pointer text-xs"
+                                  >
+                                    <span>Review Answers</span>
+                                    <ChevronRight className="h-3 w-3 group-hover:translate-x-0.5 transition" />
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : null}        
+          </main>
+        </div>
+      </div>
+
+      {/* Offline Status footer bar banner */}
+      <footer className="border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 mt-20 py-4 text-center text-[11px] text-slate-400 transition-colors select-none">
+        <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-3 font-mono">
+          <span>&copy; Made by Akash Chaudhary for his Beautiful Wife ,Trishna</span>
+          <span className="flex items-center space-x-1 border border-slate-200 dark:border-slate-800 rounded px-2.5 py-0.5 bg-slate-50 dark:bg-slate-950 font-bold text-[10px]">
+            <Check className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+            <span>100% Cloud Synchronized Practice Ready</span>
+          </span>
+        </div>
+      </footer>
+
+      {/* GLOBAL MODALS */}
+      {isAdminModalOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200" onClick={() => setIsAdminModalOpen(false)}>
+          <div className="bg-white dark:bg-slate-900 w-full max-w-sm rounded-[2.5rem] shadow-2xl border border-white/20 overflow-hidden animate-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
+            <div className="p-8">
+              <div className="flex justify-between items-center mb-6">
+                <div className="flex items-center space-x-3">
+                  <div className="bg-indigo-100 dark:bg-indigo-900/50 p-2 rounded-xl">
+                    <ShieldCheck className="h-6 w-6 text-indigo-600 dark:text-indigo-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-black text-slate-900 dark:text-white font-display">Admin Section</h3>
+                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest leading-none mt-1">Management Portal</p>
+                  </div>
+                </div>
+                <button onClick={() => setIsAdminModalOpen(false)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors">
+                  <X className="h-5 w-5 text-slate-400" />
+                </button>
+              </div>
+
+              {!isAdminAuthenticated ? (
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">Pin Code Required</label>
+                    <input 
+                      type="password"
+                      value={adminPasswordInput}
+                      onChange={(e) => { setAdminPasswordInput(e.target.value); setAdminError(false); }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          if (adminPasswordInput === '123456') {
+                            setIsAdminAuthenticated(true);
+                            setAdminPasswordInput("");
+                          } else {
+                            setAdminError(true);
+                          }
+                        }
+                      }}
+                      className={`w-full bg-slate-50 dark:bg-slate-850 border ${adminError ? 'border-rose-300 ring-4 ring-rose-500/10' : 'border-slate-200 dark:border-slate-800'} px-5 py-4 rounded-2xl text-sm font-bold outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all`}
+                      placeholder="••••••"
+                      autoFocus
+                    />
+                    {adminError && <p className="text-[10px] font-bold text-rose-500 mt-2 ml-1 uppercase tracking-wider">Invalid Administrator Password</p>}
+                  </div>
+                  <button 
+                    onClick={() => {
+                      if (adminPasswordInput === '123456') {
+                        setIsAdminAuthenticated(true);
+                        setAdminPasswordInput("");
+                      } else {
+                        setAdminError(true);
+                      }
+                    }}
+                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs py-4 rounded-2xl shadow-xl shadow-indigo-200 dark:shadow-none transition-all active:scale-95"
+                  >
+                    LOGIN TO ADMIN
+                  </button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 gap-3">
+                   <button
+                    onClick={() => { setActiveTab('questions'); setReviewedAttempt(null); setIsAdminModalOpen(false); }}
+                    className="flex items-center space-x-4 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-850 hover:bg-indigo-50 dark:hover:bg-indigo-950/20 hover:border-indigo-200 transition-all text-left"
+                  >
+                    <div className="bg-white dark:bg-slate-900 p-2 rounded-xl shadow-sm border border-slate-100 dark:border-slate-800">
+                      <LayoutGrid className="h-5 w-5 text-indigo-600" />
+                    </div>
+                    <div>
+                      <div className="text-xs font-black text-slate-800 dark:text-slate-200 uppercase tracking-wide">Question Bank</div>
+                      <div className="text-[10px] text-slate-400 font-medium">Manage and edit bank</div>
+                    </div>
+                  </button>
+
+                  <button
+                    onClick={() => { setIsUploadModalOpen(true); setIsAdminModalOpen(false); }}
+                    className="flex items-center space-x-4 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-850 hover:bg-indigo-50 dark:hover:bg-indigo-950/20 hover:border-indigo-200 transition-all text-left"
+                  >
+                    <div className="bg-white dark:bg-slate-900 p-2 rounded-xl shadow-sm border border-slate-100 dark:border-slate-800">
+                      <FileCode className="h-5 w-5 text-indigo-600" />
+                    </div>
+                    <div>
+                      <div className="text-xs font-black text-slate-800 dark:text-slate-200 uppercase tracking-wide">Bulk Extractor</div>
+                      <div className="text-[10px] text-slate-400 font-medium">HTML Mock Parsing</div>
+                    </div>
+                  </button>
+
+                  <button
+                    onClick={() => { handleResetDatabase(); setIsAdminModalOpen(false); }}
+                    className="flex items-center space-x-4 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-850 hover:bg-rose-50 dark:hover:bg-rose-950/20 hover:border-rose-200 transition-all text-left group"
+                  >
+                    <div className="bg-white dark:bg-slate-900 p-2 rounded-xl shadow-sm border border-slate-100 dark:border-slate-800">
+                      <Trash2 className="h-5 w-5 text-rose-500 group-hover:scale-110 transition-transform" />
+                    </div>
+                    <div>
+                      <div className="text-xs font-black text-slate-800 dark:text-slate-200 uppercase tracking-wide">Master Reset</div>
+                      <div className="text-[10px] text-slate-400 font-medium">Wipe all practice data</div>
+                    </div>
+                  </button>
+
+                  <button 
+                    onClick={() => setIsAdminAuthenticated(false)}
+                    className="mt-4 py-2 border border-slate-100 dark:border-slate-800 rounded-xl text-[9px] font-black text-slate-400 hover:text-rose-500 uppercase tracking-widest text-center transition-colors"
+                  >
+                    Sign Out Administrator
+                  </button>
+                </div>
+               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isUploadModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-fade-in" onClick={() => !uploadProgress && setIsUploadModalOpen(false)}>
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-[2.5rem] p-8 shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto relative" onClick={e => e.stopPropagation()}>
+            {!uploadProgress && (
+              <button 
+                onClick={() => setIsUploadModalOpen(false)} 
+                className="absolute top-6 right-6 p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 cursor-pointer"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            )}
+
+            <div className="space-y-6 mt-2">
+              <h3 className="text-2xl font-black tracking-tight mb-2 flex items-center space-x-2 text-slate-900 dark:text-white font-display">
+                <FileCode className="h-6 w-6 text-indigo-600 dark:text-indigo-400" />
+                <span>Bulk HTML Question Extractor</span>
+              </h3>
+              <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed max-w-2xl font-medium">
+                Drag and drop your offline HTML mockup tests here. Our resilient parsing engine will instantly extract questions, options, and keys into format-ready banks.
+              </p>
+
+              <div 
+                onDragOver={handleDragOver}
+                onDrop={handleDrop}
+                onClick={() => !uploadProgress && fileInputRef.current?.click()}
+                className={`mt-4 border-2 border-dashed border-indigo-100 dark:border-indigo-950/80 hover:border-indigo-600 dark:hover:border-indigo-500/50 bg-slate-50/30 dark:bg-slate-900/40 rounded-[2rem] p-10 text-center transition-all group ${uploadProgress ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+              >
+                <input 
+                  type="file" 
+                  accept=".html, .htm" 
+                  ref={fileInputRef} 
+                  onChange={handleFileUpload} 
+                  multiple
+                  className="hidden" 
+                />
+                {uploadProgress ? (
+                  <div className="flex flex-col items-center justify-center space-y-4 py-2">
+                    <div className="w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+                    <div className="text-sm font-black text-slate-700 dark:text-slate-300 font-display">
+                      Processing {uploadProgress.current} of {uploadProgress.total} file(s)...
+                    </div>
+                    <div className="text-xs font-bold text-indigo-600 dark:text-indigo-400">
+                      {uploadProgress.questionsFound} potential questions extracted so far
+                    </div>
+                    <div className="w-full max-w-xs bg-slate-200 dark:bg-slate-800 rounded-full h-2">
+                      <div className="bg-indigo-600 h-2 rounded-full transition-all duration-300 mx-auto" style={{ width: `${Math.max(5, (uploadProgress.current / Math.max(1, uploadProgress.total)) * 100)}%` }}></div>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <UploadCloud className="h-10 w-10 text-slate-400 group-hover:text-indigo-650 mx-auto mb-3 transition-colors shrink-0" />
+                    <span className="text-sm font-black block mb-1 text-slate-700 dark:text-slate-300 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors font-display">Drag and Drop HTML mockup files here</span>
+                    <span className="text-xs text-slate-400 dark:text-slate-500 block">or click to browse your folders (Accepts bulk .html files)</span>
+                  </>
+                )}
+              </div>
+
+              {uploadError && (
+                <div className="mt-4 p-3 bg-red-500/10 border border-red-500/20 text-red-650 dark:text-red-400 text-xs rounded-xl flex items-start space-x-2">
+                  <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+                  <div>
+                    <span className="font-bold">Extraction Info:</span>
+                    <p className="mt-0.5">{uploadError}</p>
+                  </div>
+                </div>
+              )}
+
+              <div className="pt-4">
+                <label className="text-xs font-black text-slate-400 dark:text-slate-500 block mb-2 uppercase font-display">Target Subject Tag</label>
+                <div className="flex items-center space-x-3">
+                   <input
+                     type="text"
+                     value={stagingSubject}
+                     onChange={(e) => setStagingSubject(e.target.value || "Upload")}
+                     placeholder="e.g. Science Entrance..."
+                     className="flex-1 text-xs font-bold h-11 border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-850 rounded-xl px-3 outline-none text-slate-700 dark:text-white"
+                   />
+                   <span className="text-[10px] text-slate-400 hidden sm:block max-w-xs leading-tight">These files will map to <strong className="text-indigo-500">{stagingSubject}</strong>.</span>
+                </div>
+              </div>
+
+              {stagedQuestions.length > 0 && (
+                <div className="mt-6 border-t border-slate-100 dark:border-slate-800 pt-6 animate-fade-in">
+                  <div className="flex items-center justify-between mb-4">
+                    <h4 className="text-sm font-black tracking-tight">Extracted Questions Preview ({stagedQuestions.length})</h4>
+                    <div className="flex items-center space-x-2">
+                      <button
+                        onClick={copyAllStagedToClipboard}
+                        className={`p-2 rounded-lg transition-all cursor-pointer ${copyingAll ? 'bg-emerald-100 text-emerald-600' : 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-950/30'}`}
+                        title="Copy All Extracted Text"
+                      >
+                        {copyingAll ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                      </button>
+                      
+                      {!isSaving && !importSuccess && (
+                        <button
+                          onClick={saveStagedToBank}
+                          className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl flex items-center space-x-2 shadow-lg shadow-emerald-500/20 cursor-pointer transition uppercase"
+                        >
+                          <Check className="h-4 w-4" />
+                          <span>Confirm & Import</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {isSaving && (
+                    <div className="bg-slate-50 dark:bg-slate-850 p-4 rounded-2xl border border-indigo-100 dark:border-indigo-900/30 mb-4 animate-pulse">
+                      <div className="flex justify-between items-center mb-2">
+                        <span className="text-xs font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest">Committing to Firebase...</span>
+                        <span className="text-xs font-mono font-bold">{savingProgress}%</span>
+                      </div>
+                      <div className="w-full bg-slate-200 dark:bg-slate-800 rounded-full h-2.5 overflow-hidden">
+                        <div className="bg-indigo-600 h-full transition-all duration-300" style={{ width: `${savingProgress}%` }} />
+                      </div>
+                      <p className="text-[10px] text-slate-400 mt-2 text-center italic">Writing data structures securely to cloud indexes...</p>
+                    </div>
+                  )}
+
+                  {importSuccess && (
+                    <div className="bg-emerald-50 dark:bg-emerald-900/20 p-4 rounded-2xl border border-emerald-200 dark:border-emerald-800/50 mb-4 flex items-center space-x-3 text-emerald-700 dark:text-emerald-400 animate-bounce-slow">
+                      <Check className="h-5 w-5 shrink-0" />
+                      <span className="text-xs font-bold">{importSuccess}</span>
+                    </div>
+                  )}
+
+                  <button onClick={() => setStagedQuestions([])} className="self-end text-[10px] font-bold text-slate-400 hover:text-rose-500 hidden sm:block mb-2">Clear Queue</button>         
+                  
+                  <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2 border border-slate-100 dark:border-slate-800 p-2 rounded-2xl bg-slate-50 dark:bg-slate-900/50">
+                    {stagedQuestions.map((q, qIndex) => (
+                      <div key={qIndex} className="p-3 bg-white dark:bg-slate-850 border border-slate-200 dark:border-slate-700 rounded-xl relative group">
+                        <div className="absolute top-3 right-3 flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition">
+                          <button onClick={() => deleteStagedItem(qIndex)} className="p-1 rounded-md bg-red-50 text-red-500 dark:bg-red-900/30 hover:bg-red-100 transition cursor-pointer" title="Remove item">
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                        <div className="mb-2 pr-12">
+                            <FormattedText text={q.questionText} className="text-xs font-bold text-slate-800 dark:text-slate-200 line-clamp-2" />
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                           {q.options.map((opt, optIndex) => (
+                              <div key={optIndex} className={`text-[10px] px-2 py-1 rounded border truncate flex items-center space-x-1 ${q.correctAnswerIndex === optIndex ? 'bg-emerald-50 border-emerald-200 text-emerald-800 dark:bg-emerald-900/20 dark:border-emerald-800/50 dark:text-emerald-300 font-bold' : 'bg-slate-50 border-slate-100 text-slate-600 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-400'}`}>
+                                <span className="opacity-50">{String.fromCharCode(65 + optIndex)}:</span>
+                                <FormattedText text={opt} className="truncate" />
+                              </div>
+                           ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
