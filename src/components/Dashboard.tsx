@@ -215,7 +215,12 @@ export default function Dashboard() {
     { id: 'exam-2', name: 'JEE Main', targetDate: '2026-04-15' },
     { id: 'exam-3', name: 'Board Exams', targetDate: '2026-02-15' }
   ]);
-  const [stagingSubject, setStagingSubject] = useState<string>("HTML Upload");
+  
+  // Custom Subject Tag States (Persistent Dropdown Logic)
+  const [subjectTagsList, setSubjectTagsList] = useState<string[]>(["Rajasthan GK", "HTML Upload", "General Science"]);
+  const [stagingSubject, setStagingSubject] = useState<string>("Rajasthan GK");
+  const [newCustomTagInput, setNewCustomTagInput] = useState<string>("");
+
   const [uploadError, setUploadError] = useState<string>("");
   const [uploadProgress, setUploadProgress] = useState<{current: number, total: number, questionsFound: number} | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -285,14 +290,27 @@ export default function Dashboard() {
     }
   };
 
-  // Setup mount listeners (Realtime Sync & Isolated Local Storage Arrays)
+  // Sync mount and persistent selectors
   useEffect(() => {
     const storedTheme = localStorage.getItem('THEME_MODE');
     if (storedTheme === 'dark') {
       setIsDarkMode(true);
     }
 
-    // Load local-only review bank map
+    // Load custom tags created by administrator
+    const storedTags = localStorage.getItem('MOCK_SUBJECT_TAGS');
+    if (storedTags) {
+      try {
+        setSubjectTagsList(JSON.parse(storedTags));
+      } catch (e) { console.error(e); }
+    }
+
+    // Sticky / Persistent upload tag check
+    const storedStickyTag = localStorage.getItem('MOCK_STICKY_UPLOAD_TAG');
+    if (storedStickyTag) {
+      setStagingSubject(storedStickyTag);
+    }
+
     const storedLocalReview = localStorage.getItem('MOCK_REVIEW_STATES');
     if (storedLocalReview) {
       try {
@@ -320,7 +338,6 @@ export default function Dashboard() {
       }
     });
 
-    // Default to Empty array for absolute clean state on new devices
     const storedAttempts = localStorage.getItem('MOCK_ATTEMPTS');
     if (storedAttempts) {
       try {
@@ -383,6 +400,34 @@ export default function Dashboard() {
 
     return () => unsubscribe();
   }, []);
+
+  // Handles updating the dynamic tags list
+  const handleAddNewSubjectTag = (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanTag = newCustomTagInput.trim();
+    if (!cleanTag) return;
+    
+    if (subjectTagsList.includes(cleanTag)) {
+      alert("This tag is already configured inside the system dropdown.");
+      return;
+    }
+
+    const updatedTags = [...subjectTagsList, cleanTag];
+    setSubjectTagsList(updatedTags);
+    localStorage.setItem('MOCK_SUBJECT_TAGS', JSON.stringify(updatedTags));
+    
+    // Auto shift selected target to the newly created tag and freeze it
+    setStagingSubject(cleanTag);
+    localStorage.setItem('MOCK_STICKY_UPLOAD_TAG', cleanTag);
+    
+    setNewCustomTagInput("");
+    alert(`Successfully registered "${cleanTag}" tag.`);
+  };
+
+  const handleUpdateStagingSubject = (val: string) => {
+    setStagingSubject(val);
+    localStorage.setItem('MOCK_STICKY_UPLOAD_TAG', val);
+  };
 
   const saveQuestionsToDB = (newQList: Question[]) => {
     setQuestions(newQList);
@@ -608,12 +653,10 @@ export default function Dashboard() {
     setActiveQuizSettings(settings);
   };
 
-  // Handles finish event and isolates review processing flags inside current environment local storage
   const handleFinishQuiz = (attempt: TestAttempt) => {
     const nextAttempts = [attempt, ...attempts];
     saveAttemptsToDB(nextAttempts);
 
-    // Lock parameters down cleanly to resolve the blank review screen bug
     setReviewedAttempt(attempt);
     setActiveTab('review');
 
@@ -621,7 +664,6 @@ export default function Dashboard() {
       attempt.answers.filter(a => a.selectedIndex !== null).length
     );
 
-    // Save incorrect triggers strictly into local storage review dictionary map
     const wrongIds = attempt.answers.filter(a => !a.isCorrect && a.selectedIndex !== null).map(a => a.questionId);
     if (wrongIds.length > 0) {
       const updatedLocalReview = { ...localReviewBank };
@@ -639,7 +681,6 @@ export default function Dashboard() {
     setActiveQuizSettings(null);
   };
 
-  // Safe toggling of local device bookmarks without changing Firestore global parameters
   const toggleBookmark = (id: string) => {
     const updatedLocalReview = { ...localReviewBank };
     const currentStatus = updatedLocalReview[id]?.isBookmarked || false;
@@ -674,7 +715,6 @@ export default function Dashboard() {
 
   const filteredQuestions = getFilteredQuestions();
 
-  // Metrics Evaluation Logic
   const totalTests = attempts.length;
   const avgAccuracy = totalTests > 0 
     ? Math.round(attempts.reduce((sum, att) => sum + att.scorePercentage, 0) / totalTests)
@@ -712,7 +752,6 @@ export default function Dashboard() {
     }));
   };
 
-  // Helper arrays filtered locally per device
   const deviceReviewQuestions = questions.filter(q => localReviewBank[q.id]?.isBookmarked || localReviewBank[q.id]?.needsReview);
 
   if (activeQuizQuestions && activeQuizSettings) {
@@ -1590,6 +1629,23 @@ export default function Dashboard() {
                 </div>
               ) : (
                 <div className="grid grid-cols-1 gap-3">
+                   {/* Custom Tag Management Input Console for Administrator */}
+                   <form onSubmit={handleAddNewSubjectTag} className="p-3.5 bg-slate-50 dark:bg-slate-850 rounded-2xl border border-slate-200 dark:border-slate-750 mb-2">
+                     <label className="block text-[10px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest mb-1.5">Add Custom Bulk Subject Tag</label>
+                     <div className="flex space-x-2">
+                       <input 
+                         type="text" 
+                         value={newCustomTagInput} 
+                         onChange={(e) => setNewCustomTagInput(e.target.value)}
+                         placeholder="e.g. Geography Level 1" 
+                         className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-[11px] font-bold px-2.5 py-1.5 rounded-xl outline-none"
+                       />
+                       <button type="submit" className="bg-indigo-600 hover:bg-indigo-700 text-white p-2 rounded-xl transition-all">
+                         <Plus className="w-3.5 h-3.5" />
+                       </button>
+                     </div>
+                   </form>
+
                    <button
                     onClick={() => { setActiveTab('questions'); setReviewedAttempt(null); setIsAdminModalOpen(false); }}
                     className="flex items-center space-x-4 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-850 hover:bg-indigo-50 dark:hover:bg-indigo-950/20 hover:border-indigo-200 transition-all text-left"
@@ -1709,20 +1765,29 @@ export default function Dashboard() {
                 </div>
               )}
 
+              {/* Dynamic / Persistent Target Subject Selector Dropdown Module */}
               <div className="pt-4">
-                <label className="text-xs font-black text-slate-400 dark:text-slate-500 block mb-2 uppercase font-display">Target Subject Tag</label>
+                <label className="text-xs font-black text-slate-400 dark:text-slate-500 block mb-2 uppercase font-display">Target Subject Tag (Fixed Selection)</label>
                 <div className="flex items-center space-x-3">
-                   <input
-                     type="text"
-                     value={stagingSubject}
-                     onChange={(e) => setStagingSubject(e.target.value || "Upload")}
-                     placeholder="e.g. Science Entrance..."
-                     className="flex-1 text-xs font-bold h-11 border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-850 rounded-xl px-3 outline-none text-slate-700 dark:text-white"
-                   />
-                   <span className="text-[10px] text-slate-400 hidden sm:block max-w-xs leading-tight">These files will map to <strong className="text-indigo-500">{stagingSubject}</strong>.</span>
+                   <div className="relative flex-1">
+                     <select
+                       value={stagingSubject}
+                       onChange={(e) => handleUpdateStagingSubject(e.target.value)}
+                       className="w-full bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-700 px-4 py-3 rounded-xl text-xs font-bold appearance-none outline-none focus:ring-2 focus:ring-indigo-500/20 text-slate-700 dark:text-white"
+                     >
+                       {subjectTagsList.map((tag) => (
+                         <option key={tag} value={tag}>{tag}</option>
+                       ))}
+                     </select>
+                     <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" />
+                   </div>
+                   <span className="text-[10px] text-slate-400 hidden sm:block max-w-xs leading-tight">
+                     These files will map to <strong className="text-indigo-500">{stagingSubject}</strong>. (This target remains frozen for bulk sets until updated).
+                   </span>
                 </div>
               </div>
 
+              {/* Staging Render */}
               {stagedQuestions.length > 0 && (
                 <div className="mt-6 border-t border-slate-100 dark:border-slate-800 pt-6 animate-fade-in">
                   <div className="flex items-center justify-between mb-4">
