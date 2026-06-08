@@ -326,10 +326,10 @@ export default function Dashboard() {
         snapshot.size
       );
 
-      const firestoreQuestions = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
+     const firestoreQuestions = snapshot.docs.map(doc => ({
+  ...doc.data(),
+  firestoreId: doc.id
+}));
 
       setQuestions(firestoreQuestions);
 
@@ -801,6 +801,10 @@ export default function Dashboard() {
 
     // Save active attempt for review
     setReviewedAttempt(attempt);
+setReviewedAttempt(attempt);
+
+// Open result screen automatically
+setActiveTab('review');
 
     // Update Daily Progress
     updateProgress(attempt.answers.filter(a => a.selectedIndex !== null).length);
