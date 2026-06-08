@@ -1,12 +1,3 @@
-Bhai, aapki teenon naye requirements ko code me implement kar diya gaya hai:
-
-1. **Target Subject Dropdown with Custom Additions:** `stagingSubject` ko ab ek simple text input se badalkar ek intelligent dropdown input bana diya hai. Isme **Rajasthan GK** pehle se prebuilt hai.
-2. **Admin Control to Add New Tags:** Admin jab chahe tab dynamic tareeqe se naye tags isi dropdown me add kar sakta hai. Yeh tags locally store honge takı har device apna custom sub-setup maintain kar sake.
-3. **Sticky Dropdown Selection:** Jab aap bulk upload karte hain, toh ek baar select kiya hua subject tag fix (`persistent`) rahega. Jab tak aap khud use change nahi karenge, tab tak baar-baar upload karte waqt wahi selected tag automatically apply hota rahega.
-
-Yahan aapka updated aur full customized code hai:
-
-```tsx
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
