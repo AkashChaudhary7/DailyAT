@@ -798,10 +798,15 @@ if (
     saveAttemptsToDB(nextAttempts);
 
     // Save active attempt for review
-    setReviewedAttempt(attempt);
+setReviewedAttempt(attempt);
 
-    // Update Daily Progress
-    updateProgress(attempt.answers.filter(a => a.selectedIndex !== null).length);
+// Automatically open result screen
+setActiveTab('review');
+
+// Update Daily Progress
+updateProgress(
+  attempt.answers.filter(a => a.selectedIndex !== null).length
+);
 
     // Mark wrong questions for review
     const wrongIds = attempt.answers.filter(a => !a.isCorrect && a.selectedIndex !== null).map(a => a.questionId);
