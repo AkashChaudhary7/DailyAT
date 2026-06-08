@@ -997,18 +997,6 @@ updateProgress(
                 </button>
 
                 <button
-                  onClick={() => { setActiveTab('leaderboard'); setReviewedAttempt(null); setIsWorkspaceMenuOpen(false); }}
-                  className={`w-full flex items-center space-x-3 text-xs font-black uppercase p-3.5 rounded-2xl border transition-all ${
-                    activeTab === 'leaderboard' && !reviewedAttempt
-                      ? 'bg-indigo-55 dark:bg-indigo-950/40 border-indigo-200 dark:border-indigo-850 text-indigo-600 dark:text-indigo-400 shadow-md shadow-indigo-100/10'
-                      : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-850 text-slate-500 hover:text-indigo-600'
-                  }`}
-                >
-                  <Trophy className="w-4.5 h-4.5 shrink-0" />
-                  <span>Exam Leaderboard</span>
-                </button>
-
-                <button
                   onClick={() => { setActiveTab('review-bank'); setReviewedAttempt(null); setIsWorkspaceMenuOpen(false); }}
                   className={`w-full flex items-center space-x-3 text-xs font-black uppercase p-3.5 rounded-2xl border transition-all ${
                     activeTab === 'review-bank' && !reviewedAttempt
@@ -1203,7 +1191,7 @@ updateProgress(
                     <div className="text-lg font-black text-indigo-600 dark:text-indigo-400 font-display leading-none">{questions.length}</div>
                   </div>
                   <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-3 rounded-xl">
-                    <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 leading-none truncate">Mocks</div>
+                    <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 leading-none truncate">Mocks Given</div>
                     <div className="text-lg font-black text-rose-500 font-display leading-none">{attempts.length}</div>
                   </div>
                   <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-3 rounded-xl">
@@ -1753,86 +1741,12 @@ updateProgress(
               </div>
             ) : null}
 
-            {/* TAB 5: Leaderboard console */}
-            {activeTab === 'leaderboard' && !reviewedAttempt ? (
-              <div className="space-y-6">
-                
-                {/* Leaderboard intro banner */}
-                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-5 sm:p-6 shadow-sm transition-colors text-center max-w-xl mx-auto">
-                  <div className="h-14 w-14 rounded-full bg-amber-500/10 flex items-center justify-center text-amber-500 mx-auto mb-4 border border-amber-500/20 shadow animate-bounce-slow">
-                    <Award className="h-8 w-8" />
-                  </div>
-                  
-                  <h4 className="text-base font-black tracking-tight mb-2">Simulated National Mock Leaderboard</h4>
-                  <p className="text-xs text-slate-400 leading-relaxed">
-                    Submit test assessments regularly to generate leaderboard points! Every correct solution earns +10 dynamic ranking points, updating your status against simulated online competitors.
-                  </p>
-                </div>
-
-                {/* Main Leaderboard Table Grid */}
-                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm overflow-hidden transition-colors max-w-xl mx-auto">
-                  <div className="p-4 border-b border-slate-100 dark:border-slate-800 font-bold text-xs flex justify-between items-center bg-slate-50/50 dark:bg-slate-850/20 select-none">
-                    <span className="text-slate-400">Rank List</span>
-                    <span className="text-rose-500 uppercase tracking-widest text-[9px] font-bold">Standard Merit Columns</span>
-                  </div>
-
-                  <div className="divide-y divide-slate-100 dark:divide-slate-850">
-                    {leaderboard.map((user) => {
-                      const isMe = user.isCurrentUser;
-                      
-                      return (
-                        <div 
-                          key={user.id} 
-                          className={`p-4 flex items-center justify-between transition-all ${
-                            isMe 
-                              ? 'bg-rose-500/10 border-l-4 border-rose-500 font-bold' 
-                              : 'hover:bg-slate-50 dark:hover:bg-slate-850/25'
-                          }`}
-                        >
-                          <div className="flex items-center space-x-3.5">
-                            {/* Rank Column badge */}
-                            <div className={`h-7 w-7 rounded-lg flex items-center justify-center font-bold text-xs shrink-0 ${
-                              user.rank === 1 ? 'bg-amber-100 text-amber-600 dark:bg-amber-955' :
-                              user.rank === 2 ? 'bg-slate-100 text-slate-600 dark:bg-slate-850' :
-                              user.rank === 3 ? 'bg-orange-100 text-orange-600 dark:bg-orange-955' :
-                              'text-slate-400'
-                            }`}>
-                              {user.rank === 1 ? '🥇' : user.rank === 2 ? '🥈' : user.rank === 3 ? '🥉' : user.rank.toString().padStart(2, '0')}
-                            </div>
-
-                            <div>
-                              <span className={`text-xs block ${isMe ? 'text-rose-600 dark:text-rose-450 font-bold' : 'font-medium'}`}>
-                                {user.name}
-                              </span>
-                              <span className="text-[9px] text-slate-400 block font-mono font-medium mt-0.5">
-                                {user.testsTaken} Tests | {user.averageAccuracy}% Accuracy
-                              </span>
-                            </div>
-                          </div>
-
-                          <div className="text-right">
-                            <span className="text-xs font-bold font-mono text-slate-750 dark:text-slate-200">
-                              {user.totalScore} Points
-                            </span>
-                            <span className="text-[8px] text-slate-400 block uppercase tracking-wider font-bold">Accumulated Score</span>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-
-              </div>
-            ) : null}
-
-          </main>
-        </div>
-      </div>
+          
 
       {/* Offline Status footer bar banner */}
       <footer className="border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 mt-20 py-4 text-center text-[11px] text-slate-400 transition-colors select-none">
         <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-3 font-mono">
-          <span>&copy; Made by Akash Chaudhary for his Beautiful Wife , Trishna </span>
+          <span>&copy; Made by Akash Chaudhary for his Beautiful Wife ,Trishna </span>
           <span className="flex items-center space-x-1 border border-slate-200 dark:border-slate-800 rounded px-2.5 py-0.5 bg-slate-50 dark:bg-slate-950 font-bold text-[10px]">
             <Check className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
             <span>100% Cloud Synchronized Practice Ready</span>
