@@ -222,9 +222,9 @@ export default function Dashboard() {
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [stagedQuestions, setStagedQuestions] = useState<Question[]>([]);
   const [examCounters, setExamCounters] = useState<ExamCounter[]>([
-    { id: 'exam-1', name: 'NEET 2026', targetDate: '2026-05-04' },
-    { id: 'exam-2', name: 'JEE Main', targetDate: '2026-04-15' },
-    { id: 'exam-3', name: 'Board Exams', targetDate: '2026-02-15' }
+    { id: 'exam-1', name: 'CET 2026', targetDate: '2026-05-04' },
+    { id: 'exam-2', name: 'RAS PRE', targetDate: '2026-04-15' },
+    { id: 'exam-3', name: 'DSSSB', targetDate: '2026-02-15' }
   ]);
   const [stagingSubject, setStagingSubject] = useState<string>("HTML Upload");
   const [uploadError, setUploadError] = useState<string>("");
@@ -2035,7 +2035,7 @@ updateProgress(
         </div>
       )}
 
-    </div>
+    </main>
   );
 }
 
