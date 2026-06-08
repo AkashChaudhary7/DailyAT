@@ -319,9 +319,9 @@ useEffect(() => {
       );
 
       const firestoreQuestions = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
+  ...doc.data(),
+  firestoreId: doc.id
+}));
 
       setQuestions(firestoreQuestions);
 
