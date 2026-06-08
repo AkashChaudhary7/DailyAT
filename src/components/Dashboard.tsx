@@ -1093,7 +1093,7 @@ export default function Dashboard() {
                             type="number"
                             value={quizCount}
                             onChange={(e) => setQuizCount(Math.max(1, parseInt(e.target.value) || 0))}
-                            className="w-full bg-slate-50 dark:bg-slate-150 border border-slate-200 dark:border-slate-150 px-4 py-3.5 rounded-2xl text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500/20"
+                            className="w-full bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-750 px-4 py-3.5 rounded-2xl text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500/20"
                           />
                         </div>
                         <div>
@@ -1866,5 +1866,3 @@ export default function Dashboard() {
     </div>
   );
 }
-
-```
