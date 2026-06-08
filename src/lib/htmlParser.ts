@@ -736,8 +736,8 @@ function convertHtmlWithDevLys(text: string): string {
   if (!text) return "";
   
   // Basic check: if it already has more than 5% Devanagari, don't re-convert
-  const devanagariCount = (text.match(/[\u0900-\u097F]/g) || []).length;
-  if (devanagariCount > text.length * 0.05) return normalizeHindiText(text);
+ /** const devanagariCount = (text.match(/[\u0900-\u097F]/g) || []).length; 
+ if (devanagariCount > text.length * 0.05) return normalizeHindiText(text);*/
 
   // Protect [IMAGE: ...] markers and other structured strings from conversion
   const protectedStrings: string[] = [];
