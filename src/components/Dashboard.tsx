@@ -10,6 +10,7 @@ import {
   onSnapshot,
   query
 } from 'firebase/firestore';
+import { collection, onSnapshot, doc, writeBatch } from "firebase/firestore";
 import { db } from '../lib/firebase';
 import { parseUniversalHTML } from '../lib/htmlParser';
 import { SAMPLE_QUESTIONS } from '../utils/sampleData';
@@ -60,6 +61,114 @@ import FormattedText from './FormattedText';
 interface LocalReviewState {
   isBookmarked?: boolean;
   needsReview?: boolean;
+}
+
+export function FlaggedQuestionsManager() {
+  const [flaggedData, setFlaggedData] = useState<any[]>([]);
+  const [processingId, setProcessingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(collection(db, "flagged_questions"), (snapshot) => {
+      const rows = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setFlaggedData(rows);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Bulk JSON Sheet Downloader Action Matrix
+  const downloadBulkFlaggedJson = () => {
+    if (flaggedData.length === 0) return alert("System database clear, no rows to dump!");
+    const fileData = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(flaggedData, null, 2));
+    const exportAnchor = document.createElement('a');
+    exportAnchor.setAttribute("href", fileData);
+    exportAnchor.setAttribute("download", `flagged_dump_sheet_${Date.now()}.json`);
+    document.body.appendChild(exportAnchor);
+    exportAnchor.click();
+    exportAnchor.remove();
+  };
+
+  // Re-Upload Corrected Spreadsheet File Sync Action 
+  const handleSpreadsheetSyncUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const sheetReader = new FileReader();
+    if (e.target.files && e.target.files[0]) {
+      sheetReader.readAsText(e.target.files[0], "UTF-8");
+      sheetReader.onload = async (readerEvent) => {
+        try {
+          const syncArray = JSON.parse(readerEvent.target?.result as string);
+          if (!Array.isArray(syncArray)) return alert("Formatting execution error! Expected Array database rows.");
+
+          const batch = writeBatch(db);
+          syncArray.forEach((item) => {
+            // Re-sync parameter settings to active questions registry reference node
+            batch.set(doc(db, "questions", item.id), {
+              ...item,
+              status: "active",
+              updatedAt: new Date().toISOString()
+            }, { merge: true });
+
+            // Purge flagged queue log
+            batch.delete(doc(db, "flagged_questions", item.id));
+          });
+
+          await batch.commit();
+          alert("Bohat badiya bhai! Saare corrected questions active pool mein wapas sync ho gaye hain!");
+        } catch (err) {
+          alert("JSON compilation parser error.");
+        }
+      };
+    }
+  };
+
+  return (
+    <div className="bg-white rounded-3xl p-6 border border-gray-100 shadow-sm mt-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-gray-100 pb-5 mb-5 gap-4">
+        <div>
+          <h2 className="text-xl font-bold text-gray-800">Flagged Garbage Font Queue</h2>
+          <p className="text-gray-400 text-sm mt-0.5">Pending evaluation entries count: {flaggedData.length}</p>
+        </div>
+        
+        <div className="flex flex-wrap gap-3">
+          <button 
+            onClick={downloadBulkFlaggedJson}
+            className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-xl shadow-sm transition duration-150"
+          >
+            📥 Download Flagged Data (JSON)
+          </button>
+          
+          <label className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold rounded-xl shadow-sm cursor-pointer transition duration-150">
+            📤 Upload Corrected JSON Sync
+            <input type="file" accept=".json" onChange={handleSpreadsheetSyncUpload} className="hidden" />
+          </label>
+        </div>
+      </div>
+
+      <div className="space-y-4 max-h-[600px] overflow-y-auto pr-2">
+        {flaggedData.map((q) => (
+          <div key={q.id} className="p-4 rounded-2xl bg-gray-50 border border-gray-100 flex flex-col justify-between gap-3">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] uppercase font-bold tracking-wider bg-red-100 text-red-700 px-2 py-0.5 rounded-md">Flagged Log</span>
+                <span className="text-xs text-gray-400 font-medium">Exam: {q.targetExam} | Subject: {q.subject}</span>
+              </div>
+              <p className="text-sm font-semibold text-gray-700 pt-1">{q.questionText}</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-2 text-xs text-gray-500">
+                {q.options?.map((opt: string, idx: number) => (
+                  <div key={idx} className={idx === q.correctAnswerIndex ? "text-emerald-600 font-bold" : ""}>
+                    ({idx + 1}) {opt}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        ))}
+        {flaggedData.length === 0 && (
+          <div className="text-center py-12 text-gray-400 text-sm">
+            Bhai system ekdum clean hai! Koi bhi flagged font errors pending nahi hain.
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 // Exam Counter Card Component
