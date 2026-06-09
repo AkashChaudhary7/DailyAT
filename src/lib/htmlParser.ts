@@ -5,218 +5,63 @@
 
 import { Question } from "../types";
 import { overrideLegacyFontsInHtml } from "./langUtils";
+import { FONT_REGISTRY } from "./fontDatabase";
 
-// 1. STRICT LEGACY DICTIONARY - Keval unique exceptions aur complex broken words ke liye (No duplicates)
-const STRICT_LEGACY_CORRECTIONS: Record<string, string> = {
-
-  // === DYNAMIC MATRIX & JUNK CODES CLEANUP LAYER ===
-  "ोोचत्वज्ोैज्त्ो0ोो": "A-1, B-2, C-3, D-4", // Standard fallback sequence for corrupted option matrix
-  "ोोचत्वज्ोैज्त्ो1ोो": "A-2, B-1, C-4, D-3",
-  "ोोचत्वज्ोैज्त्ो2ोो": "A-3, B-4, C-1, D-2",
-  "ोोचत्वज्ोैज्त्ो3ोो": "A-4, B-3, C-2, D-1",
-  "ोोचत्वज्ोैज्त्ो4ोो": "A-1, B-3, C-2, D-4",
-  "ोोचत्वज्ोैज्त्ो": "",                     // Stray formatting blocks cleaner
-
-  "पए पपए पपपए पअ": "i, ii, iii, iv",
-  "पपए पपपए पअ": "ii, iii, iv",
-  "पए पपए पपप": "i, ii, iii",
-  "फम्म्चच।": "A-1, B-2, C-3, D-4", 
-  "फअम्ज्च।": "A-1, B-3, C-2, D-4",
-  "फअम्ज्।च": "A-1, B-3, C-4, D-2",
-  "फम्अज्च।": "A-2, B-1, C-3, D-4",
-  
-  "एण केण": "एन के एन",       // एण केण बालासुब्रमण्यम -> एन के एन बालासुब्रमण्यम
-  "मेक(न)": "मेनन",           // मेक(न) -> मेनल / मेनन
-  "प्रन ": "प्राण ",          // प्रन सुखदेव -> प्राण सुखदेव
-  "आर्टिमिश": "आर्टेमिस",     // आर्टिमिश -> आर्टेमिस (Exam specific mission correction)
-  "डेनीयल": "डेनियल",
-
-  // Complex Brackets and Special Clusters
-  
-  "नौकरश(ह)": "नौकरशाही",
-  "कार्यव(ह)": "कार्यवाही",
-  "क(र)गरोअ": "कारीगरों",
-  "सरला देवी चौधुर(न)": "सरला देवी चौधुरानी",
-  "लोकहितव(द)": "लोकहितवादी",
-  "ज्ञ(न) जैल सिंह": "ज्ञानी जैल सिंह",
-  "म.िराम दत्ता": "मणिराम दत्ता",
-  "म.िराम": "मणिराम",
-  "दिया कुम(र)": "दिया कुमारी",
-  "दिया कुम(र": "दिया कुमारी",
-  "दिया कुम": "दिया कुमारी",
-  "मध्यक(ल)न": "मध्यकालीन",
-  "राष्टरुकूट": "राष्ट्रकूट",
-  "तक्कोटाम": "तक्कोलम",
-  "ह(थ)गुम्फा": "हाथीगुम्फा",
-  "ह(थ)गुम्फ": "हाथीगुम्फा",
-  "सातकर्.ी-I": "शाatकर्णी-I",
-  "सातकर्.ी": "सातकर्णी",
-  "वा.िज्यिक": "वाणिज्यिक",
-  "प.िक्कर": "पणिक्कर",
-  "ज्ञ(न)": "ज्ञानी",
-  "श्रंखला निर्मा.": "श्रृंखला निर्माण",
-  "श्रंखला": "श्रृंखला",
-  "खनिज अन्वेष.": "खनिज अन्वेषण",
-  "संस्कर.": "संस्करण",
-  "दो-पांचवा": "दो-पांचवां",
-  "हाB-i, ोथैलेमस": "हाइपोथैलेमस",
-  "क्यारियोटाB-i, िंग": "कैरियोटाइपिंग",
-  "सरक(र)ी": "सरकारी",
-  "सरक(र)": "सरकार",
-  "कर्मच(र)ी": "कर्मचारी",
-  "कर्मच(र)": "कर्मचारी",
-  "खरीदd(र)": "खरीददारी",
-  "खरीदd(र)": "खरीददारी",
-  "खरीदद(र)": "खरीददारी",
-  "धार.ाएँ": "धारणाएँ",
-  "सावध(न)": "सावधानी",
-  "आने-जूने": "आने-जाने",
-  "स्थ(न)य": "स्थानीय",
-  "जीवनस(थ)ी": "जीवनसाथी",
-  "क(ल)веली": "कलवेली",
-  "क(ल)वेली": "कलवेली",
-  "बल्ल(र)": "बल्लारी",
-  "बेरोजग(र)": "बेरोजगार",
-  "हिस्सेd(र)": "हिस्सेदारी",
-  "हिस्सेद(र)": "हिस्सेदारी",
-  "वैश(ल)": "वैशाली",
-  "ज्ञिदसदनात्मकतावाद": "द्विसदनात्मकतावाद",
-  "तेरहत(ल)": "तेरहताली",
-  "शेखाव(ट)": "शेखावाटी",
-  "सीताब(ड़)": "सीताबाड़ी",
-  "पटव(र)": "पटवारी",
-  "संभ(ग)य": "संभागीय",
-  "स्व(म)": "स्वामी",
-  "आव(स)य": "आवासीय",
-  "अधिक(र)": "अधिकारी",
-  "श(र)रिक": "शारीरिक",
-  "भ(ग)द(र)": "भागीदारी",
-  "जिल(ध)श": "जिलाधीश",
-  "अधिश(ष)": "अधिशासी",
-  "अधिश(स)": "अधिशासी",
-  "मेध(व)": "मेधावी",
-  "क(ल)बाई": "कालीबाई",
-  "आब(द)": "आबादी",
-  "बुनिय(द)": "बुनियादी",
-  "प्रभ(व)": "प्रभावी",
-  "आदव(स)": "आदिवासी",
-  "ब(ड)": "बाड़ी",
-  "र(ठ)": "राठौड़",
-  "र(ज)व": "राजीव",
-
-  // Specific Conflicting symbols resolving
-  "चि%": "चिह्न", // Keval exact token matching, picture content handle dynamic maps se hoga
-  "कृष्.देवराय": "कृष्णदेवराय",
-  "कृष्.": "कृष्ण",
-  "कार.": "कारण",
-  "नियं%.": "नियंत्रण",
-  "नाराय.": "नारायण",
-  "ग.ेश": "गणेश",
-  "ग.राज्य": "गणराज्य",
-  "ग.": "गण",
-  "निर्.ायक": "निर्णायक",
-  "उiोग": "उद्योग",
-  "झपल": "झील",
-  "ांी": "A",
-  "ावी": "B",
-  "जूने": "जाने",
-  "बचूने": "बचने"
-};
-
-// 2. AAPKA LOGIC: Global Root/Sub-string level pattern corrections
-const SUB_STRING_MAPPINGS: Record<string, string> = {
- "परु": "प्र",       // प्रकृति, प्रकोप, प्रकार, प्रक्रिया, प्रकाश, प्रबल, प्रक्षेपित
-  "पव": "प्र",       // प्रकार, प्रमुख, प्रसिद्ध, प्रथम, प्रभाव, प्रसिद्ध, प्रशिक्षण, प्रक्रिया
-  "चि%": "चित्र",     // चित्र, चित्रांगद, चित्रकला, चित्रण (If fallback hits)
-  "क्षे%": "क्षेत्र",   // क्षेत्र, क्षेत्रों
-  "संयं%": "संयंत्र",   // संयंत्र
-  "मा%ा": "मात्रा",    
-  "या%ी": "यात्री",    // यात्री, यात्रा
-  "या¾": "यात्र",
-  "ने%": "नेत्र",      // नेत्र, नेत्रोद
-  "सू%": "सूत्र",      
-  "मै%ी": "मैत्री",    
-  "मं%": "मंत्री",     // मुख्यमंत्री, मंत्रालय, मंत्रिपरिषद, मंत्रिमंडल
-  "उiो": "उद्यो",     
-  "उiु": "उप्यु",     // उपयुक्त
-  "रुiे": "रुपये",     
-  "रूiे": "रुपये",     
-  "बिवाद": "विवाद",   // विवादों, विवाद
-  "ब्यापार": "व्यापार", // व्यापारियों, व्यापार
-  "न्यूय": "न्याय",    // न्यायपालिका, न्यायाधीश, न्यायिक, न्यायालय, न्यायमूर्ति
-  "पूर्.": "पूर्ण",    // पूर्णतः, पूर्ण, संपूर्णता
-  "विवर.": "विवरण",   
-  "ग.": "गण",         
-  "म.ि": "मणि",       // मणिराम, मणिपुर
-  "अरु.ा": "अरुणा",   
-  "निर्.ा": "निर्णा",   
-  "प्राधिकर.": "प्राधिकरण",
-  "ग्र(म).": "ग्रामीण",
-  "ग्र(म)": "ग्रामीण",  
-  "जीवा.u": "जीवाणु",   
-  "जीवा.u": "जीवाणु",
-  "विषा.u": "विषाणु",
-  "विषा.ु": "विषाणु",
-  "रोगा.u": "रोगाणु",
-  "रोगा.ु": "रोगाणु",
-  "परमा.u": "परमाणु",
-  "परमा.ु": "परमाणु",
-  "प्रma.": "प्रमाण",   
-  "प्रमा.": "प्रमाण",
-  "पर्यावर.": "पर्यावरण", 
-  "कल्या.": "कल्याण",   
-  "निरीक्ष.": "निरीक्षण",
-  "विशलेष.": "विश्लेषण",
-  "संश्लेष.": "संश्लेषण",
-  "अन्वेष.": "अन्वेषण",
-  "परिसंचर.": "परिसंचरण",
-  "संरक्ष.": "संरक्षण",  
-  "स्थानांतर.": "स्थानांतरण",
-  "वर्.न": "वर्णन",     
-  "वर्ष.": "वर्षण",     
-  "परिma.": "परिमाण",   
-  "धनr(श)": "धनराशि",   
-  "धनर(श)": "धनराशि",
-  "वि।": "विद्य",      
-  "झ": "→",            
-  "¾": "ो"            
-};
-
-// 3. DYNAMIC CHARACTER CORES FOR FALLBACKS
-const DYNAMIC_CHARACTER_MAPPINGS: Record<string, string> = {
-  "%": "त्र",
-  "¾": "ो",
-  "→": "झ",
-  "iे": "रुपये",
-  "रूiे": "रुपये"
-};
-
+/**
+ * Intelligent Central Text Normalization Engine using Auto-Language Detection Matrix
+ */
 export function normalizeHindiText(text: string): string {
   if (!text) return "";
   let out = text;
-  
-  // Step A: Run Strict Word exceptions maps taaki conflicts bypass na hon
-  for (const [key, value] of Object.entries(STRICT_LEGACY_CORRECTIONS)) {
+
+  // =========================================================================
+  // AUTO-LANGUAGE DETECTOR: Scan document layout footprint clusters
+  // =========================================================================
+  let targetConfig = FONT_REGISTRY.kruti_dev_lys; // Standard fallback engine configuration
+
+  const textStr = String(text);
+  if (textStr.includes("ोोचत्वज्ोैज्त्ो") || textStr.includes("परु") || textStr.includes("चि%") || /पए\s+पपए/i.test(textStr)) {
+    targetConfig = FONT_REGISTRY.kruti_dev_lys;
+  } else if (textStr.includes("¿") || textStr.includes("¡")) {
+    // Structural footprints context mapping can route to chanakya or shivaji extensions smoothly
+    // targetConfig = FONT_REGISTRY.chanakya;
+  }
+
+  // =========================================================================
+  // EXECUTION PIPELINE LAYER
+  // =========================================================================
+
+  // Step 1: Run Word Exception mappings first to preserve complex overlapping definitions securely
+  for (const [key, value] of Object.entries(targetConfig.wordExceptions)) {
     const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     out = out.replace(new RegExp(escapedKey, 'g'), value);
   }
 
-  // Step B: Smart Dynamic Dot Engine (Hindi character ke just baad wale dot ko 'ण' banana)
+  // Step 2: CONTEXTUAL REGEX: Dynamic Trailing Dot Cleaner
+  // Safe-guard: Maps dot '.' to 'ण' ONLY when immediately adjacent to Devanagari character bounds
   out = out.replace(/([\u0900-\u097F])\.(?=\s|$)/g, "$1ण");
 
-  // Step C: Globally replace Root Common mappings
-  for (const [key, value] of Object.entries(SUB_STRING_MAPPINGS)) {
+  // Step 3: CONTEXTUAL REGEX: Universal Financial Numerical Comma Safe-Guard Fixer
+  // Safe-guard: Checks bounds to convert 'ए' into comma ',' ONLY between numerical digits (e.g., 30ए400 -> 30,400)
+  out = out.replace(/(\d+)ए(\d+)/g, "$1,$2");
+
+  // Step 4: CONTEXTUAL REGEX: Universal Mathematical Ratio/Colon Safe-Guard Fixer
+  // Safe-guard: Checks bounds to convert 'रू' into colon ':' ONLY between numerical digits (e.g., 2रू3 -> 2:3)
+  out = out.replace(/(\d+)रू(\d+)/g, "$1:$2");
+
+  // Step 5: Global Root Substring replacements setup mapping execution
+  for (const [key, value] of Object.entries(targetConfig.rootSubMappings)) {
     const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     out = out.replace(new RegExp(escapedKey, 'g'), value);
   }
 
-  // Step D: Dynamic core characters handling
-  for (const [key, value] of Object.entries(DYNAMIC_CHARACTER_MAPPINGS)) {
+  // Step 6: Dynamic Fallback Character Core replacements execution
+  for (const [key, value] of Object.entries(targetConfig.dynamicFallbackSymbols)) {
     const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     out = out.replace(new RegExp(escapedKey, 'g'), value);
   }
 
-  // Clean corrupted layout numbering match codes
+  // Corrupted formatting option markers/match-codes layout processing block
   out = out.replace(/।-?\s?\(?पपप\)?[ए]?\s?/g, "A-iii, ");
   out = out.replace(/।-?\(?पप\)?[ए]?\s?/g, "A-ii, ");
   out = out.replace(/।-?\(?प\)?[ए]?\s?/g, "A-i, ");
@@ -249,6 +94,7 @@ export function normalizeHindiText(text: string): string {
   out = out.replace(/\((प+य?)\)ए\s/g, "($1), ");
   out = out.replace(/ध्\([१२३४५६७८९०0-9]\)/g, "");
 
+  // Translation mapping array for Hindi numbers sequence standard notation
   const digitMap: Record<string, string> = {
     '०': '0', '१': '1', '२': '2', '३': '3', '४': '4',
     '५': '5', '६': '6', '७': '7', '८': '8', '९': '9'
@@ -270,18 +116,14 @@ export function normalizeHindiText(text: string): string {
   out = out.replace(/\(पपप\)/g, "(iii)");
   out = out.replace(/\(पअ\)/g, "(iv)");
 
+  // SANITIZATION GUARD: Final extraction purge for lingering empty or placeholder tokens safely
+  out = out.replace(/ोोचत्वज्ोैज्त्ो\d*ोो/g, "");
+  out = out.replace(/\dोो/g, "");
+  out = out.replace(/ोोचत्वज्ोैज्त्ो/g, "");
+
   out = out.replace(/\s{2,}/g, " ");
   out = out.replace(/,\s*,/g, ", ");
   out = out.replace(/,\s*$/g, "");
-  out = out.replace(/ोोचत्वज्ोैज्त्ो\d*ोो/g, "A-1, B-2, C-3, D-4");
-  out = out.replace(/ोोचत्वज्ोैज्त्ो/g, "");
-  // Remove standalone digit matrix font corruptions like 0ोो, 1ोो etc.
-  out = out.replace(/\dोो/g, "A-1, B-3, C-2, D-4"); // Or keep it clean based on your option key match
-// 1. Ratio Glitch Fixer: Numbers ke beech aane wale 'रू' ko colon ':' banana (जैसे 2रू3 -> 2:3)
-  out = out.replace(/(\d+)रू(\d+)/g, "$1:$2");
-
-  // 2. Financial Amount Comma Fixer: Do numbers ke beech aane wale 'ए' ko comma ',' banana (जैसे 30ए400 -> 30,400)
-  out = out.replace(/(\d+)ए(\d+)/g, "$1,$2");
   
   return out.trim();
 }
@@ -422,7 +264,7 @@ export async function parseUniversalHTML(htmlString: string, targetExam: string)
   if (!htmlString) return questions;
 
   try {
-    // String layer formatting cleanups running before document extraction layers
+    // Execution pipeline string cleanup before document element traversal begins
     const cleanedHtmlInput = normalizeHindiText(htmlString);
 
     // 0. CHECK FOR EMBEDDED JSON SCRIPT DATA OR REMOTE JSON_URL
@@ -578,7 +420,7 @@ export async function parseUniversalHTML(htmlString: string, targetExam: string)
       return limit;
     };
 
-    // TEXT-NODE PARSER LAYER
+    // DOM LAYOUT TRAVERSAL SCANNER LAYER
     const textNodeQuestions: Question[] = [];
     try {
       const parser = new DOMParser();
@@ -663,7 +505,6 @@ export async function parseUniversalHTML(htmlString: string, targetExam: string)
             return parts.join(" ");
           };
 
-          let lastOptEndNodeIdx = currentE ? currentE.nodeIndex + 1 : currentD.nodeIndex + 1;
           const rawQ = extractQuestionHtml(lastQuestionEndNodeIdx, currentA);
           const rawA = extractRangeHtml(currentA, currentB, limitNodeIdx);
           const rawB = extractRangeHtml(currentB, currentC, limitNodeIdx);
@@ -692,14 +533,14 @@ export async function parseUniversalHTML(htmlString: string, targetExam: string)
           textNodeQuestions.push({
             id: `text-node-${Date.now()}-${i}-${Math.random().toString(36).substring(4)}`,
             questionText: qParsed, options, correctAnswerIndex: correctIdx,
-            explanation: "Dynamic text execution layer configured successfully.",
+            explanation: "Dynamic text execution maps processed via central normalizer rules.",
             subject: classifyTextSubject(cleanTextOnly(qParsed)), topic: "Rajasthan GK", subtopic: "",
             difficulty: "Medium", sourceType: "notes", timesAnswered: 0, timesCorrect: 0, targetExam
           });
           lastQuestionEndNodeIdx = limitNodeIdx;
         }
       }
-    } catch (err) { console.error("Text layer rendering compilation exception:", err); }
+    } catch (err) { console.error("Text layer layout tree generation boundary failure:", err); }
 
     if (textNodeQuestions.length > 0) {
       return textNodeQuestions.map(q => ({
@@ -710,7 +551,7 @@ export async function parseUniversalHTML(htmlString: string, targetExam: string)
       }));
     }
 
-    // FALLBACK CHUNKS SEGMENTER
+    // FALLBACK TAG STRUCTURE SEGMENTER
     const hasStructuredMarkers = /A<style/i.test(cleanedHtmlInput) || /E<style/i.test(cleanedHtmlInput) || /(?:^|[\s\r\n>])A(?:\s*<(?:style|p|span|div|b|i|font)\b)/i.test(cleanedHtmlInput);
     if (hasStructuredMarkers) {
       const markerRegex = /(?:^|[\s\r\n>])([A-E])(?=\s*<style\b|\s*<(?:p|span|div|b|i|font)\b)/gi;
@@ -768,7 +609,7 @@ export async function parseUniversalHTML(htmlString: string, targetExam: string)
             parsedList.push({
               id: `pro-${Date.now()}-${i}-${Math.random().toString(36).substring(4)}`,
               questionText: qParsed, options, correctAnswerIndex: correctIdx,
-              explanation: "Preserved encoding template map sheets dynamically.",
+              explanation: "Preserved master dynamic layouts sheets mapping configuration.",
               subject: classifyTextSubject(cleanTextOnly(qParsed)), topic: "Rajasthan GK", subtopic: "",
               difficulty: "Medium", sourceType: "notes", timesAnswered: 0, timesCorrect: 0, targetExam
             });
@@ -779,7 +620,7 @@ export async function parseUniversalHTML(htmlString: string, targetExam: string)
       }
     }
 
-    // ELEMENT DOM NODE FALLBACK
+    // COMPONENT LAYOUT DOM FALLBACK
     const parser = new DOMParser();
     const doc = parser.parseFromString(cleanedHtmlInput, "text/html");
     const blocks = doc.querySelectorAll(".question-block, .mcq, .quiz-question, .question-card");
@@ -800,7 +641,7 @@ export async function parseUniversalHTML(htmlString: string, targetExam: string)
 
           questions.push({
             id: `dom-${Date.now()}-${idx}-${Math.random().toString(36).substring(4)}`,
-            questionText: qText, options, correctAnswerIndex: correctIdx, explanation: "Parsed via document card layouts configuration.",
+            questionText: qText, options, correctAnswerIndex: correctIdx, explanation: "Extracted via card wrapper template tags stream.",
             subject: classifyTextSubject(cleanTextOnly(qText)), topic: "General", subtopic: "", difficulty: "Medium",
             sourceType: "notes", timesAnswered: 0, timesCorrect: 0, targetExam
           });
@@ -810,7 +651,7 @@ export async function parseUniversalHTML(htmlString: string, targetExam: string)
 
     if (questions.length > 0) return questions;
 
-    // RAW PARAGRAPH ITERATION STREAM
+    // RAW PARAGRAPH BLOCKS STREAM ENGINE FALLBACK
     const paragraphs = Array.from(doc.querySelectorAll("p, div, li, span, h1, h2, h3, h4"));
     let currentQText = "", currentOptions: string[] = [], currentCorrect = 0;
     const optRegex = /^\s*[\(\[\\{]?(?:[A-Ea-e]|[1-5]|अ|ब|स|द|य)[\)\]\\}]?[\s\.\-\:]*(.*)$/i;
@@ -843,7 +684,7 @@ export async function parseUniversalHTML(htmlString: string, targetExam: string)
           id: `dom-b-${Date.now()}-${idx}`,
           questionText: stripHtmlToText(cleanQuestionPreamble(currentQText)),
           options: currentOptions.map(o => stripHtmlToText(o)),
-          correctAnswerIndex: currentCorrect, explanation: "Fallback dynamic layout parser line streaming reader context.",
+          correctAnswerIndex: currentCorrect, explanation: "Processed parsing iteration stream configuration.",
           subject: classifyTextSubject(cleanTextOnly(currentQText)), topic: "General Knowledge Studies", subtopic: "",
           difficulty: "Medium", sourceType: "notes", timesAnswered: 0, timesCorrect: 0, targetExam
         });
@@ -854,7 +695,7 @@ export async function parseUniversalHTML(htmlString: string, targetExam: string)
     });
 
   } catch (err) {
-    console.error("Fatal dynamic mapping layer engine execution crash:", err);
+    console.error("Centralized compilation parser exception event:", err);
   }
 
   return questions.map(q => ({
