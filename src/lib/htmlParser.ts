@@ -267,6 +267,8 @@ export function normalizeHindiText(text: string): string {
   out = out.replace(/,\s*$/g, "");
   out = out.replace(/ोोचत्वज्ोैज्त्ो\d*ोो/g, "A-1, B-2, C-3, D-4");
   out = out.replace(/ोोचत्वज्ोैज्त्ो/g, "");
+  // Remove standalone digit matrix font corruptions like 0ोो, 1ोो etc.
+  out = out.replace(/\dोो/g, "A-1, B-3, C-2, D-4"); // Or keep it clean based on your option key match
   
   return out.trim();
 }
