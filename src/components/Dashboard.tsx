@@ -8,9 +8,10 @@ import {
   addDoc,
   collection,
   onSnapshot,
-  query
+  query,
+  doc,
+  writeBatch
 } from 'firebase/firestore';
-import { collection, onSnapshot, doc, writeBatch } from "firebase/firestore";
 import { db } from '../lib/firebase';
 import { parseUniversalHTML } from '../lib/htmlParser';
 import { SAMPLE_QUESTIONS } from '../utils/sampleData';
@@ -63,9 +64,11 @@ interface LocalReviewState {
   needsReview?: boolean;
 }
 
+// =========================================================================
+// INTEGRATED ADMIN QUEUE COMPONENT ENGINE VIEW
+// =========================================================================
 export function FlaggedQuestionsManager() {
   const [flaggedData, setFlaggedData] = useState<any[]>([]);
-  const [processingId, setProcessingId] = useState<string | null>(null);
 
   useEffect(() => {
     const unsubscribe = onSnapshot(collection(db, "flagged_questions"), (snapshot) => {
@@ -101,8 +104,13 @@ export function FlaggedQuestionsManager() {
           syncArray.forEach((item) => {
             // Re-sync parameter settings to active questions registry reference node
             batch.set(doc(db, "questions", item.id), {
-              ...item,
-              status: "active",
+              id: item.id,
+              questionText: item.questionText,
+              options: item.options,
+              correctAnswerIndex: item.correctAnswerIndex,
+              explanation: item.explanation || "",
+              subject: item.subject || "General Studies",
+              targetExam: item.targetExam || "Exam",
               updatedAt: new Date().toISOString()
             }, { merge: true });
 
@@ -120,7 +128,7 @@ export function FlaggedQuestionsManager() {
   };
 
   return (
-    <div className="bg-white rounded-3xl p-6 border border-gray-100 shadow-sm mt-6">
+    <div className="bg-white rounded-3xl p-6 border border-gray-100 shadow-sm mt-2">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-gray-100 pb-5 mb-5 gap-4">
         <div>
           <h2 className="text-xl font-bold text-gray-800">Flagged Garbage Font Queue</h2>
@@ -322,7 +330,6 @@ export default function Dashboard() {
   const [examCounters, setExamCounters] = useState<ExamCounter[]>([
     { id: 'exam-1', name: 'NEET 2026', targetDate: '2026-05-04' },
     { id: 'exam-2', name: 'JEE Main', targetDate: '2026-04-15' },
-    
   ]);
   
   // Custom Subject Tag States (Persistent Dropdown Logic)
@@ -978,6 +985,21 @@ export default function Dashboard() {
                     </span>
                   </div>
                 </button>
+
+                {/* 🚩 DYNAMIC NAVIGATION ROUTE TRIGGER INTEGRATION */}
+                {isAdminAuthenticated && (
+                  <button
+                    onClick={() => { setActiveTab('flagged-manager'); setReviewedAttempt(null); setIsWorkspaceMenuOpen(false); }}
+                    className={`w-full flex items-center space-x-3 text-xs font-black uppercase p-3.5 rounded-2xl border transition-all ${
+                      activeTab === 'flagged-manager'
+                        ? 'bg-red-50 dark:bg-red-950/40 border-red-200 text-red-600 shadow-md shadow-red-100/10'
+                        : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-850 text-slate-500 hover:text-red-600'
+                    }`}
+                  >
+                    <AlertCircle className="w-4.5 h-4.5 shrink-0 text-red-500" />
+                    <span>🚩 Flagged Queue</span>
+                  </button>
+                )}
               </div>
             </div>
           </nav>
@@ -1662,7 +1684,12 @@ export default function Dashboard() {
                   )}
                 </div>
               </div>
-            ) : null}        
+            ) : null}
+
+            {/* 🚩 LIVE NAVIGATION MANAGER ROUTE INTERACTION ELEMENT */}
+            {activeTab === 'flagged-manager' && isAdminAuthenticated && (
+              <FlaggedQuestionsManager />
+            )}
           </main>
         </div>
       </div>
@@ -1738,7 +1765,6 @@ export default function Dashboard() {
                 </div>
               ) : (
                 <div className="grid grid-cols-1 gap-3">
-                   {/* Custom Tag Management Input Console for Administrator */}
                    <form onSubmit={handleAddNewSubjectTag} className="p-3.5 bg-slate-50 dark:bg-slate-850 rounded-2xl border border-slate-200 dark:border-slate-750 mb-2">
                      <label className="block text-[10px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest mb-1.5">Add Custom Bulk Subject Tag</label>
                      <div className="flex space-x-2">
