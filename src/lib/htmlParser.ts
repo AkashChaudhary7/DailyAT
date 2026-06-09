@@ -16,6 +16,14 @@ const STRICT_LEGACY_CORRECTIONS: Record<string, string> = {
   "ोोचत्वज्ोैज्त्ो3ोो": "A-4, B-3, C-2, D-1",
   "ोोचत्वज्ोैज्त्ो4ोो": "A-1, B-3, C-2, D-4",
   "ोोचत्वज्ोैज्त्ो": "",                     // Stray formatting blocks cleaner
+
+  "पए पपए पपपए पअ": "i, ii, iii, iv",
+  "पपए पपपए पअ": "ii, iii, iv",
+  "पए पपए पपप": "i, ii, iii",
+  "फम्म्चच।": "A-1, B-2, C-3, D-4", 
+  "फअम्ज्च।": "A-1, B-3, C-2, D-4",
+  "फअम्ज्।च": "A-1, B-3, C-4, D-2",
+  "फम्अज्च।": "A-2, B-1, C-3, D-4",
   
   "एण केण": "एन के एन",       // एण केण बालासुब्रमण्यम -> एन के एन बालासुब्रमण्यम
   "मेक(न)": "मेनन",           // मेक(न) -> मेनल / मेनन
@@ -269,6 +277,11 @@ export function normalizeHindiText(text: string): string {
   out = out.replace(/ोोचत्वज्ोैज्त्ो/g, "");
   // Remove standalone digit matrix font corruptions like 0ोो, 1ोो etc.
   out = out.replace(/\dोो/g, "A-1, B-3, C-2, D-4"); // Or keep it clean based on your option key match
+// 1. Ratio Glitch Fixer: Numbers ke beech aane wale 'रू' ko colon ':' banana (जैसे 2रू3 -> 2:3)
+  out = out.replace(/(\d+)रू(\d+)/g, "$1:$2");
+
+  // 2. Financial Amount Comma Fixer: Do numbers ke beech aane wale 'ए' ko comma ',' banana (जैसे 30ए400 -> 30,400)
+  out = out.replace(/(\d+)ए(\d+)/g, "$1,$2");
   
   return out.trim();
 }
