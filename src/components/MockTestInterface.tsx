@@ -5,9 +5,10 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Question, QuizSettings, TestAttempt, AttemptAnswer } from '../types';
+import { doc, setDoc, deleteDoc } from 'firebase/firestore';
+import { db } from '../lib/firebase';
 import { Timer, AlertTriangle, ChevronRight, ChevronLeft, Flag, CheckCircle, ArrowLeft, Trash2, BookOpen } from 'lucide-react';
 import FormattedText from './FormattedText';
-import { doc, setDoc, deleteDoc } from "firebase/firestore";
 
 interface MockTestInterfaceProps {
   questions: Question[];
@@ -60,42 +61,53 @@ export default function MockTestInterface({
       if (timerRef.current) clearInterval(timerRef.current);
     };
   }, [settings.hasTimer]);
-// ==========================================
-  // HERE: handleSubmit ke just upar ye code paste karein
+
+  const handleAutoSubmit = () => {
+    submitQuiz();
+  };
+
+  // ==========================================
+  // CORE FLAG BUTTON HANDLER ACTION MATRIX
   // ==========================================
   const handleFlagFontError = async () => {
     if (!questions || questions.length === 0) return;
-    const currentQuestion = questions[currentQuestionIndex];
+    const currentQuestion = questions[currentIndex];
     
-    const confirmation = window.confirm("Bhai, kya aap is question ko Font Error karke live test se hatana chahte hain?");
+    const confirmation = window.confirm("Bhai, kya aap is question ko Font Error/Garbage reporting ke liye flag karke live test se hatana chahte hain?");
     if (!confirmation) return;
 
     try {
-      // 1. Core Firestore isolated database pool mein data send karo
+      // 1. Send data to flagged review collection pool in Firestore
       await setDoc(doc(db, "flagged_questions", currentQuestion.id), {
-        ...currentQuestion,
+        id: currentQuestion.id,
+        questionText: currentQuestion.questionText,
+        options: currentQuestion.options,
+        correctAnswerIndex: currentQuestion.correctAnswerIndex,
+        explanation: currentQuestion.explanation || "",
+        subject: currentQuestion.subject || "General",
+        targetExam: currentQuestion.targetExam || settings.subject || "Exam",
         flaggedAt: new Date().toISOString(),
         status: "pending"
       });
 
-      // 2. Active questions pool se instant wipeout karo taaki live baki users ko na dikhe
+      // 2. Remove instantly from active questions pool in state/UI
       await deleteDoc(doc(db, "questions", currentQuestion.id));
 
       alert("Question reported and safely isolated!");
       
-      // Automatic current screen index ko aage badha do
-      if (currentQuestionIndex < questions.length - 1) {
-        setCurrentQuestionIndex(prev => prev + 1);
+      // Auto advance or navigate handle index rows
+      if (currentIndex < questions.length - 1) {
+        navigateTo(currentIndex + 1);
+      } else if (currentIndex > 0) {
+        navigateTo(currentIndex - 1);
       } else {
-        alert("Mock test completed all validation rows!");
+        alert("Bhai, array database set completed!");
+        onCancel();
       }
     } catch (error) {
-      console.error("Flag operation logging error:", error);
-      alert("Database node transition failed.");
+      console.error("Flag operation error context:", error);
+      alert("Database node isolation failed.");
     }
-  };
-  const handleAutoSubmit = () => {
-    submitQuiz();
   };
 
   // Convert seconds to MM:SS
@@ -378,14 +390,7 @@ export default function MockTestInterface({
                 <label htmlFor="auto-advance-chk" className="cursor-pointer font-medium">Auto-Advance</label>
               </div>
             </div>
-{/* Paste this anywhere alongside your test navigation button states */}
-<button
-  type="button"
-  onClick={handleFlagFontError}
-  className="px-4 py-2 bg-red-50 text-red-600 hover:bg-red-100 font-semibold border border-red-200 text-sm rounded-xl transition duration-200 flex items-center gap-2 shadow-sm"
->
-  🚩 
-</button>
+
             <div className="flex items-center space-x-2.5">
               <button
                 onClick={() => navigateTo(currentIndex - 1)}
@@ -398,6 +403,14 @@ export default function MockTestInterface({
               >
                 <ChevronLeft className="h-4 w-4 mr-1" />
                 <span>Prev</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleFlagFontError}
+                className="flex h-9 items-center px-4 bg-red-50 dark:bg-red-950/20 text-red-600 dark:text-red-400 font-bold border border-red-200 dark:border-red-900 text-xs rounded-lg transition-all shadow-sm cursor-pointer hover:bg-red-150 mr-2"
+              >
+                🚩 Report Font Error
               </button>
 
               <button
@@ -495,9 +508,6 @@ export default function MockTestInterface({
         {/* Toggle drawer/palette representation */}
         <button 
           onClick={() => {
-            // Quick toggle to show standard grid list representation in an alert or modal if needed
-            // But we can also make sure mobile users can click arrows or index quickly.
-            // Let's offer a sliding sheet overlay for mobile index grid.
             const gridEl = document.getElementById("mobile-grid-sheet");
             if (gridEl) {
               gridEl.classList.toggle("hidden");
