@@ -146,9 +146,6 @@ export function normalizeHindiText(text: string): string {
   
   return out.trim();
 }
-  
-  return out.trim();
-}
 
 function convertHtmlWithDevLys(text: string): string {
   if (!text) return "";
