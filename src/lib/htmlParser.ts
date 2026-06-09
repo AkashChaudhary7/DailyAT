@@ -40,6 +40,20 @@ export function normalizeHindiText(text: string): string {
   // Step 2: CONTEXTUAL REGEX: Dynamic Trailing Dot Cleaner
   // Safe-guard: Maps dot '.' to 'ण' ONLY when immediately adjacent to Devanagari character bounds
   out = out.replace(/([\u0900-\u097F])\.(?=\s|$)/g, "$1ण");
+  out = out.replace(/([\u0900-\u097F]+)\(([लटतधड़रषनश])\)/g, (match, word, char) => {
+    if (char === 'ल') return word + 'ली';
+    if (char === 'ट') return word + 'टी';
+    if (char === 'ध') return word + 'धी';
+    if (char === 'त') return word + 'ती';
+    if (char === 'ड़') return word + 'ड़ी';
+    if (char === 'र') return word + 'री';
+    if (char === 'न') return word + 'नी';
+    return word + char;
+  });
+
+  out = out.replace(/\(\s*\)/g, "");
+  out = out.replace(/([\u0900-\u097F])-\([a-zA-Z0-9अ-ह]+\)ए/g, "$1");
+  out = out.replace(/([\u0900-\u097F])\)ए/g, "$1");
 
   // Step 3: CONTEXTUAL REGEX: Universal Financial Numerical Comma Safe-Guard Fixer
   // Safe-guard: Checks bounds to convert 'ए' into comma ',' ONLY between numerical digits (e.g., 30ए400 -> 30,400)
@@ -115,15 +129,23 @@ export function normalizeHindiText(text: string): string {
   out = out.replace(/\(पप\)/g, "(ii)");
   out = out.replace(/\(पपप\)/g, "(iii)");
   out = out.replace(/\(पअ\)/g, "(iv)");
-
-  // SANITIZATION GUARD: Final extraction purge for lingering empty or placeholder tokens safely
+ 
+  // =========================================================================
+  // UNIVERSAL SANITIZATION PURGE: Auto-clears lingering fragments safely
+  // =========================================================================
   out = out.replace(/ोोचत्वज्ोैज्त्ो\d*ोो/g, "");
   out = out.replace(/\dोो/g, "");
   out = out.replace(/ोोचत्वज्ोैज्त्ो/g, "");
+  out = out.replace(/[अबम्]-\([a-z0-9A-Zअ-ह]+\)ए/g, "");
+  out = out.replace(/[अबम्]\)ए/g, "");
+  out = out.replace(/\(\s*\)/g, ""); // Dynamic standalone bracket layout cleaner
 
   out = out.replace(/\s{2,}/g, " ");
   out = out.replace(/,\s*,/g, ", ");
   out = out.replace(/,\s*$/g, "");
+  
+  return out.trim();
+}
   
   return out.trim();
 }
