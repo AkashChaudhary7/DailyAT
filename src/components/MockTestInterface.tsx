@@ -7,6 +7,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Question, QuizSettings, TestAttempt, AttemptAnswer } from '../types';
 import { Timer, AlertTriangle, ChevronRight, ChevronLeft, Flag, CheckCircle, ArrowLeft, Trash2, BookOpen } from 'lucide-react';
 import FormattedText from './FormattedText';
+import { doc, setDoc, deleteDoc } from "firebase/firestore";
 
 interface MockTestInterfaceProps {
   questions: Question[];
@@ -59,7 +60,40 @@ export default function MockTestInterface({
       if (timerRef.current) clearInterval(timerRef.current);
     };
   }, [settings.hasTimer]);
+// ==========================================
+  // HERE: handleSubmit ke just upar ye code paste karein
+  // ==========================================
+  const handleFlagFontError = async () => {
+    if (!questions || questions.length === 0) return;
+    const currentQuestion = questions[currentQuestionIndex];
+    
+    const confirmation = window.confirm("Bhai, kya aap is question ko Font Error karke live test se hatana chahte hain?");
+    if (!confirmation) return;
 
+    try {
+      // 1. Core Firestore isolated database pool mein data send karo
+      await setDoc(doc(db, "flagged_questions", currentQuestion.id), {
+        ...currentQuestion,
+        flaggedAt: new Date().toISOString(),
+        status: "pending"
+      });
+
+      // 2. Active questions pool se instant wipeout karo taaki live baki users ko na dikhe
+      await deleteDoc(doc(db, "questions", currentQuestion.id));
+
+      alert("Question reported and safely isolated!");
+      
+      // Automatic current screen index ko aage badha do
+      if (currentQuestionIndex < questions.length - 1) {
+        setCurrentQuestionIndex(prev => prev + 1);
+      } else {
+        alert("Mock test completed all validation rows!");
+      }
+    } catch (error) {
+      console.error("Flag operation logging error:", error);
+      alert("Database node transition failed.");
+    }
+  };
   const handleAutoSubmit = () => {
     submitQuiz();
   };
@@ -344,7 +378,14 @@ export default function MockTestInterface({
                 <label htmlFor="auto-advance-chk" className="cursor-pointer font-medium">Auto-Advance</label>
               </div>
             </div>
-
+{/* Paste this anywhere alongside your test navigation button states */}
+<button
+  type="button"
+  onClick={handleFlagFontError}
+  className="px-4 py-2 bg-red-50 text-red-600 hover:bg-red-100 font-semibold border border-red-200 text-sm rounded-xl transition duration-200 flex items-center gap-2 shadow-sm"
+>
+  🚩 
+</button>
             <div className="flex items-center space-x-2.5">
               <button
                 onClick={() => navigateTo(currentIndex - 1)}
