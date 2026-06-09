@@ -166,8 +166,8 @@ export function FlaggedQuestionsManager() {
     <div className="bg-white rounded-3xl p-6 border border-gray-100 shadow-sm mt-2">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-gray-100 pb-5 mb-5 gap-4">
         <div>
-          <h2 className="text-xl font-bold text-gray-800">Flagged Garbage Font Queue</h2>
-          <p className="text-gray-400 text-sm mt-0.5">Pending evaluation entries count: {flaggedData.length}</p>
+          <h2 className="text-xl font-bold text-gray-800">Flagged Question </h2>
+          <p className="text-gray-400 text-sm mt-0.5">Pending evaluation : {flaggedData.length}</p>
         </div>
         
         <div className="flex flex-wrap gap-3">
@@ -175,11 +175,11 @@ export function FlaggedQuestionsManager() {
             onClick={downloadBulkFlaggedJson}
             className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-xl shadow-sm transition duration-150"
           >
-            📥 Download Flagged Data (JSON)
+            📥 Download Data
           </button>
           
           <label className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold rounded-xl shadow-sm cursor-pointer transition duration-150">
-            📤 Upload Corrected JSON Sync
+            📤 Upload Data 
             <input type="file" accept=".json" onChange={handleSpreadsheetSyncUpload} className="hidden" />
           </label>
         </div>
@@ -210,7 +210,7 @@ export function FlaggedQuestionsManager() {
                 title="Restore this question to main active pool and clear flag"
               >
                 <Check className="w-3.5 h-3.5" />
-                Restore (Unflag)
+                Restore
               </button>
               <button
                 onClick={() => handleDeletePermanently(q.id)}
@@ -218,7 +218,7 @@ export function FlaggedQuestionsManager() {
                 title="Permanently delete this question from all databases"
               >
                 <Trash2 className="w-3.5 h-3.5" />
-                Purge Forever
+                Delete
               </button>
             </div>
           </div>
@@ -1071,7 +1071,7 @@ export default function Dashboard() {
             </div>
             <div>
               <h1 className="text-xl font-black tracking-tight text-indigo-900 dark:text-indigo-400 font-display">AT <span className="text-indigo-500 font-black">MOCK</span></h1>
-              <p className="text-[10px] text-slate-400 dark:text-slate-500 font-black uppercase tracking-widest leading-none mt-0.5 tracking-tighter">AT MOCK</p>
+              <p className="text-[10px] text-slate-400 dark:text-slate-500 font-black uppercase tracking-widest leading-none mt-0.5 tracking-tighter"></p>
             </div>
           </div>
 
@@ -1080,12 +1080,12 @@ export default function Dashboard() {
               {isOnline ? (
                 <>
                   <Wifi className="h-3.5 w-3.5 text-emerald-500 animate-pulse" />
-                  <span className="text-emerald-700 dark:text-emerald-400 text-[10px] font-bold uppercase tracking-wider">Cloud Sync Active</span>
+                  <span className="text-emerald-700 dark:text-emerald-400 text-[10px] font-bold uppercase tracking-wider">Active</span>
                 </>
               ) : (
                 <>
                   <Wifi className="h-3.5 w-3.5 text-amber-500" />
-                  <span className="text-amber-700 dark:text-amber-400 text-[10px] font-bold uppercase tracking-wider">Offline Mode</span>
+                  <span className="text-amber-700 dark:text-amber-400 text-[10px] font-bold uppercase tracking-wider">Offline</span>
                 </>
               )}
             </div>
@@ -1437,7 +1437,7 @@ export default function Dashboard() {
                       }`}
                     >
                       <Check className="h-5 w-5" />
-                      <span>START FULL-SCREEN QUIZ</span>
+                      <span>START TEST</span>
                     </button>
                     <button 
                       onClick={() => {
