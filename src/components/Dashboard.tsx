@@ -15,7 +15,7 @@ import {
   deleteDoc
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { parseUniversalHTML } from '../lib/htmlParser';
+import { parseUniversalHTML, normalizeHindiText } from '../lib/htmlParser';
 import { SAMPLE_QUESTIONS } from '../utils/sampleData';
 import { 
   ResponsiveContainer, 
@@ -259,7 +259,7 @@ const ExamCounterCard: React.FC<{
             type="text" 
             value={tempName} 
             onChange={(e) => setTempName(e.target.value)}
-            className="w-full text-[10px] font-bold p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-850 outline-none"
+            className="w-full text-[10px] font-bold p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-850 outline-none text-slate-900 dark:text-slate-100"
             placeholder="Exam Name"
             autoFocus
           />
@@ -267,7 +267,7 @@ const ExamCounterCard: React.FC<{
             type="date" 
             value={tempDate} 
             onChange={(e) => setTempDate(e.target.value)}
-            className="w-full text-[10px] font-bold p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-850 outline-none"
+            className="w-full text-[10px] font-bold p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-850 outline-none text-slate-900 dark:text-slate-100"
           />
           <div className="flex space-x-1.5">
             <button onClick={handleSave} className="flex-1 bg-indigo-600 text-white text-[9px] font-black py-1.5 rounded-lg uppercase transition-colors">Save</button>
@@ -331,7 +331,7 @@ const DailyGoalCard: React.FC<{
                     type="number" 
                     value={tempTarget}
                     onChange={(e) => setTempTarget(parseInt(e.target.value) || 0)}
-                    className="w-16 bg-white/10 border border-white/20 rounded px-1.5 py-0.5 text-xs font-bold outline-none"
+                    className="w-16 bg-white/10 border border-white/20 rounded px-1.5 py-0.5 text-xs font-bold text-white outline-none"
                     autoFocus
                    />
                    <button onClick={() => { onUpdateTarget(tempTarget); setIsEditing(false); }} className="p-1 bg-emerald-500 rounded text-white"><Check className="h-3 w-3" /></button>
@@ -461,10 +461,21 @@ export default function Dashboard() {
     }
   };
 
+  // Root HTML node theme and color-scheme state synchronization
+  useEffect(() => {
+    if (isDarkMode) {
+      document.documentElement.classList.add('dark');
+      document.documentElement.style.colorScheme = 'dark';
+    } else {
+      document.documentElement.classList.remove('dark');
+      document.documentElement.style.colorScheme = 'light';
+    }
+  }, [isDarkMode]);
+
   // Sync mount and persistent selectors
   useEffect(() => {
     const storedTheme = localStorage.getItem('THEME_MODE');
-    if (storedTheme === 'dark') {
+    if (storedTheme === 'dark' || (!storedTheme && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
       setIsDarkMode(true);
     }
 
@@ -493,11 +504,23 @@ export default function Dashboard() {
     const q = query(collection(db, "questions"));
     
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const firestoreQuestions = snapshot.docs.map(doc => ({
-        ...doc.data(),
-        firestoreId: doc.id,
-        id: doc.data().id || doc.id
-      })) as Question[];
+      const firestoreQuestions = snapshot.docs.map(doc => {
+        const qData = doc.data();
+        const rawQuestionText = qData.questionText || "";
+        const rawExplanation = qData.explanation || "";
+        const rawOptions = Array.isArray(qData.options) ? qData.options : [];
+        const rawSubject = qData.subject || "";
+        
+        return {
+          ...qData,
+          firestoreId: doc.id,
+          id: qData.id || doc.id,
+          questionText: normalizeHindiText(rawQuestionText),
+          explanation: normalizeHindiText(rawExplanation),
+          options: rawOptions.map((opt: any) => normalizeHindiText(String(opt))),
+          subject: normalizeHindiText(rawSubject)
+        };
+      }) as unknown as Question[];
       
       setQuestions(firestoreQuestions);
       localStorage.setItem("MOCK_QUESTIONS", JSON.stringify(firestoreQuestions));
@@ -1042,20 +1065,21 @@ export default function Dashboard() {
             </div>
             <div>
               <h1 className="text-xl font-black tracking-tight text-indigo-900 dark:text-indigo-400 font-display">AT <span className="text-indigo-500 font-black">MOCK</span></h1>
+              <p className="text-[10px] text-slate-400 dark:text-slate-500 font-black uppercase tracking-widest leading-none mt-0.5 tracking-tighter">AT MOCK</p>
             </div>
           </div>
 
           <div className="flex items-center space-x-4">
-            <div className="flex items-center space-x-1.5 border border-slate-100 dark:border-slate-200 rounded-full px-3 py-1 bg-slate-50 dark:bg-slate-850 text-xs font-medium">
+            <div className="flex items-center space-x-1.5 border border-slate-100 dark:border-slate-800 rounded-full px-3 py-1 bg-slate-50 dark:bg-slate-850 text-xs font-medium">
               {isOnline ? (
                 <>
                   <Wifi className="h-3.5 w-3.5 text-emerald-500 animate-pulse" />
-                  <span className="text-emerald-900 dark:text-emerald-900 text-[9px] font-bold uppercase tracking-wider">Online</span>
+                  <span className="text-emerald-700 dark:text-emerald-400 text-[10px] font-bold uppercase tracking-wider">Cloud Sync Active</span>
                 </>
               ) : (
                 <>
                   <Wifi className="h-3.5 w-3.5 text-amber-500" />
-                  <span className="text-amber-900 dark:text-amber-900 text-[9px] font-bold uppercase tracking-wider">Offline </span>
+                  <span className="text-amber-700 dark:text-amber-400 text-[10px] font-bold uppercase tracking-wider">Offline Mode</span>
                 </>
               )}
             </div>
@@ -1345,40 +1369,40 @@ export default function Dashboard() {
                   <div className="flex justify-between items-start mb-6 border-b border-slate-100 dark:border-slate-800/50 pb-4">
                     <div>
                       <h3 className="text-xl font-black tracking-tight font-display">Launch New Mock Test</h3>
-                      
+                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Configure real-time assessment parameters</p>
                     </div>
                     <div className="bg-indigo-50 dark:bg-indigo-950/40 p-2 rounded-xl border border-indigo-100 dark:border-indigo-900">
-                      <Settings className="w-5 h-5 text-black-700 dark:text-black-800" />
+                      <Settings className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
                     </div>
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                     <div className="space-y-6">
                       <div>
-                        <label className="block text-[10px] font-black text-slate-800 uppercase tracking-widest mb-2.5 ml-1">Practice Subject</label>
+                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2.5 ml-1">Practice Subject</label>
                         <div className="relative">
                           <select 
                             value={quizSubject}
                             onChange={(e) => setQuizSubject(e.target.value)}
-                            className="w-full bg-slate-50 dark:bg-slate-150 border border-slate-100 dark:border-slate-150 px-4 py-3.5 rounded-2xl text-xs font-bold appearance-none outline-none focus:ring-2 focus:ring-indigo-500/20"
+                            className="w-full bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-750 px-4 py-3.5 rounded-2xl text-xs font-bold appearance-none outline-none focus:ring-2 focus:ring-indigo-500/20 text-slate-900 dark:text-slate-100"
                           >
-                            <option>All Subjects</option>
+                            <option className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">All Subjects</option>
                             {availableSubjects.map(sub => (
-                              <option key={sub} value={sub}>{sub}</option>
+                              <option key={sub} value={sub} className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">{sub}</option>
                             ))}
                           </select>
-                          <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-black-900 pointer-events-none" />
+                          <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
                         </div>
                       </div>
 
                       <div className="grid grid-cols-2 gap-4">
                         <div>
-                          <label className="block text-[10px] font-black text-slate-800 uppercase tracking-widest mb-2.5 ml-1">Question Count</label>
+                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2.5 ml-1">Question Count</label>
                           <input 
                             type="number"
                             value={quizCount}
                             onChange={(e) => setQuizCount(Math.max(1, parseInt(e.target.value) || 0))}
-                            className="w-full bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-black-750 px-4 py-3.5 rounded-2xl text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500/20"
+                            className="w-full bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-750 px-4 py-3.5 rounded-2xl text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500/20 text-slate-900 dark:text-slate-100"
                           />
                         </div>
                         <div>
@@ -1388,7 +1412,7 @@ export default function Dashboard() {
                             value={timerMinutes}
                             max={180}
                             onChange={(e) => setTimerMinutes(Math.min(180, Math.max(1, parseInt(e.target.value) || 0)))}
-                            className="w-full bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-black-750 px-4 py-3.5 rounded-2xl text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500/20"
+                            className="w-full bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-750 px-4 py-3.5 rounded-2xl text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500/20 text-slate-900 dark:text-slate-100"
                             disabled={!hasTimer}
                           />
                         </div>
@@ -1542,7 +1566,7 @@ export default function Dashboard() {
                             value={newSubject}
                             onChange={(e) => setNewSubject(e.target.value)}
                             placeholder="e.g. Mathematics, Programming..."
-                            className="w-full text-xs font-semibold h-10 border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 rounded-xl px-3 outline-none"
+                            className="w-full text-xs font-semibold h-10 border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 rounded-xl px-3 outline-none text-slate-900 dark:text-slate-100"
                           />
                         </div>
                         <div>
@@ -1550,12 +1574,12 @@ export default function Dashboard() {
                           <select
                             value={newCorrectIndex}
                             onChange={(e) => setNewCorrectIndex(parseInt(e.target.value) || 0)}
-                            className="w-full text-xs font-semibold h-10 border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 rounded-xl px-3 outline-none"
+                            className="w-full text-xs font-semibold h-10 border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 rounded-xl px-3 outline-none text-slate-900 dark:text-slate-100"
                           >
-                            <option value="0">Option A is Correct Answer</option>
-                            <option value="1">Option B is Correct Answer</option>
-                            <option value="2">Option C is Correct Answer</option>
-                            <option value="3">Option D is Correct Answer</option>
+                            <option value="0" className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">Option A is Correct Answer</option>
+                            <option value="1" className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">Option B is Correct Answer</option>
+                            <option value="2" className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">Option C is Correct Answer</option>
+                            <option value="3" className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">Option D is Correct Answer</option>
                           </select>
                         </div>
                       </div>
@@ -1567,7 +1591,7 @@ export default function Dashboard() {
                           value={newQText}
                           onChange={(e) => setNewQText(e.target.value)}
                           placeholder="Type your question statement here..."
-                          className="w-full text-xs font-semibold p-2.5 bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-700 rounded-xl outline-none resize-none"
+                          className="w-full text-xs font-semibold p-2.5 bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-700 rounded-xl outline-none resize-none text-slate-900 dark:text-slate-100"
                         />
                       </div>
 
@@ -1584,7 +1608,7 @@ export default function Dashboard() {
                                 setNewOptions(next);
                               }}
                               placeholder={`Option label ${String.fromCharCode(65 + idx)}...`}
-                              className="w-full text-xs font-semibold h-9 border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 rounded-xl px-3 outline-none"
+                              className="w-full text-xs font-semibold h-9 border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 rounded-xl px-3 outline-none text-slate-900 dark:text-slate-100"
                             />
                           </div>
                         ))}
@@ -1597,7 +1621,7 @@ export default function Dashboard() {
                           value={newExplanation}
                           onChange={(e) => setNewExplanation(e.target.value)}
                           placeholder="Provide descriptive reasoning or solutions steps..."
-                          className="w-full text-xs font-semibold h-9 border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 rounded-xl px-3 outline-none"
+                          className="w-full text-xs font-semibold h-9 border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 rounded-xl px-3 outline-none text-slate-900 dark:text-slate-100"
                         />
                       </div>
 
@@ -1628,7 +1652,7 @@ export default function Dashboard() {
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
                       placeholder="Search questions by key text description..."
-                      className="w-full text-xs font-semibold h-10 pl-9 pr-3 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 rounded-xl outline-none"
+                      className="w-full text-xs font-semibold h-10 pl-9 pr-3 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 rounded-xl outline-none text-slate-900 dark:text-slate-100"
                     />
                   </div>
 
@@ -1637,11 +1661,11 @@ export default function Dashboard() {
                     <select
                       value={filterSubject}
                       onChange={(e) => setFilterSubject(e.target.value)}
-                      className="w-full sm:w-44 text-xs font-semibold h-10 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 rounded-xl px-3 outline-none"
+                      className="w-full sm:w-44 text-xs font-semibold h-10 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 rounded-xl px-3 outline-none text-slate-900 dark:text-slate-100"
                     >
-                      <option value="All">All Subjects</option>
+                      <option value="All" className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">All Subjects</option>
                       {availableSubjects.map((sub, idx) => (
-                        <option key={idx} value={sub}>{sub}</option>
+                        <option key={idx} value={sub} className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">{sub}</option>
                       ))}
                     </select>
                   </div>
@@ -1897,7 +1921,7 @@ export default function Dashboard() {
                           }
                         }
                       }}
-                      className={`w-full bg-slate-50 dark:bg-slate-850 border ${adminError ? 'border-rose-300 ring-4 ring-rose-500/10' : 'border-slate-200 dark:border-slate-800'} px-5 py-4 rounded-2xl text-sm font-bold outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all`}
+                      className={`w-full bg-slate-50 dark:bg-slate-850 border ${adminError ? 'border-rose-300 ring-4 ring-rose-500/10' : 'border-slate-200 dark:border-slate-800'} px-5 py-4 rounded-2xl text-sm font-bold outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all text-slate-900 dark:text-slate-100`}
                       placeholder="••••••"
                       autoFocus
                     />
@@ -1927,7 +1951,7 @@ export default function Dashboard() {
                          value={newCustomTagInput} 
                          onChange={(e) => setNewCustomTagInput(e.target.value)}
                          placeholder="e.g. Geography Level 1" 
-                         className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-[11px] font-bold px-2.5 py-1.5 rounded-xl outline-none"
+                         className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-[11px] font-bold px-2.5 py-1.5 rounded-xl outline-none text-slate-900 dark:text-slate-100"
                        />
                        <button type="submit" className="bg-indigo-600 hover:bg-indigo-700 text-white p-2 rounded-xl transition-all">
                          <Plus className="w-3.5 h-3.5" />
@@ -2062,10 +2086,10 @@ export default function Dashboard() {
                      <select
                        value={stagingSubject}
                        onChange={(e) => handleUpdateStagingSubject(e.target.value)}
-                       className="w-full bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-700 px-4 py-3 rounded-xl text-xs font-bold appearance-none outline-none focus:ring-2 focus:ring-indigo-500/20 text-slate-700 dark:text-white"
+                       className="w-full bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-700 px-4 py-3 rounded-xl text-xs font-bold appearance-none outline-none focus:ring-2 focus:ring-indigo-500/20 text-slate-900 dark:text-slate-100"
                      >
                        {subjectTagsList.map((tag) => (
-                         <option key={tag} value={tag}>{tag}</option>
+                         <option key={tag} value={tag} className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">{tag}</option>
                        ))}
                      </select>
                      <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" />
