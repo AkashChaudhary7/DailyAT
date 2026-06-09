@@ -10,9 +10,9 @@ import {
   onSnapshot,
   query,
   doc,
+  writeBatch,
   setDoc,
-  deleteDoc,
-  writeBatch
+  deleteDoc
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { parseUniversalHTML } from '../lib/htmlParser';
@@ -54,8 +54,7 @@ import {
   FileCode,
   Activity,
   ChevronDown,
-  ChevronRight,
-  RefreshCw
+  ChevronRight
 } from 'lucide-react';
 import { Question, TestAttempt, QuizSettings, ExamCounter, DailyGoal } from '../types';
 import MockTestInterface from './MockTestInterface';
@@ -68,11 +67,10 @@ interface LocalReviewState {
 }
 
 // =========================================================================
-// INTEGRATED ADMIN QUEUE COMPONENT ENGINE VIEW (WITH RESOLVE HANDLERS)
+// INTEGRATED ADMIN QUEUE COMPONENT ENGINE VIEW
 // =========================================================================
 export function FlaggedQuestionsManager() {
   const [flaggedData, setFlaggedData] = useState<any[]>([]);
-  const [isProcessing, setIsProcessing] = useState<string | null>(null);
 
   useEffect(() => {
     const unsubscribe = onSnapshot(collection(db, "flagged_questions"), (snapshot) => {
@@ -82,13 +80,10 @@ export function FlaggedQuestionsManager() {
     return () => unsubscribe();
   }, []);
 
-  // Action Handler: Unflag & Restore back to active pool
   const handleRestoreQuestion = async (q: any) => {
-    setIsProcessing(q.id);
+    if (!window.confirm("Bhai, kya aap sach mein is question ko unflag karke system pool mein wapas sync karna chahte hain?")) return;
     try {
-      const batch = writeBatch(db);
-      // Restore back to active pool
-      batch.set(doc(db, "questions", q.id), {
+      await setDoc(doc(db, "questions", q.id), {
         id: q.id,
         questionText: q.questionText,
         options: q.options,
@@ -97,34 +92,24 @@ export function FlaggedQuestionsManager() {
         subject: q.subject || "General Studies",
         targetExam: q.targetExam || "Exam",
         updatedAt: new Date().toISOString()
-      });
-      // Delete from flagged queue
-      batch.delete(doc(db, "flagged_questions", q.id));
-      await batch.commit();
-      alert("Question active pool mein wapas successfully restore ho gaya!");
+      }, { merge: true });
+      await deleteDoc(doc(db, "flagged_questions", q.id));
+      alert("Sunder! Question ko active pool mein wapas restore kar diya gaya hai!");
     } catch (err) {
       console.error(err);
-      alert("Failed to restore question.");
-    } finally {
-      setIsProcessing(null);
+      alert("Error restoring question");
     }
   };
 
-  // Action Handler: Delete question completely from system database
-  const handleDeleteFlaggedCompletely = async (id: string) => {
-    if (!window.confirm("Are you sure you want to completely erase this question from both active and flagged databases?")) return;
-    setIsProcessing(id);
+  const handleDeletePermanently = async (qId: string) => {
+    if (!window.confirm("Bhai, kya aap is flagged question ko system se permanent delete/purge karna chahte hain? Yeh operation irreversible hai!")) return;
     try {
-      const batch = writeBatch(db);
-      batch.delete(doc(db, "questions", id));
-      batch.delete(doc(db, "flagged_questions", id));
-      await batch.commit();
-      alert("Question permanently purge ho gaya.");
+      await deleteDoc(doc(db, "flagged_questions", qId));
+      await deleteDoc(doc(db, "questions", qId));
+      alert("Done! Flagged question ko system se permanently delete kar diya gaya hai!");
     } catch (err) {
       console.error(err);
-      alert("Failed to purge question.");
-    } finally {
-      setIsProcessing(null);
+      alert("Error deleting question");
     }
   };
 
@@ -178,17 +163,17 @@ export function FlaggedQuestionsManager() {
   };
 
   return (
-    <div className="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-gray-100 dark:border-slate-800 shadow-sm mt-2 animate-fade-in">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-gray-100 dark:border-slate-800/60 pb-5 mb-5 gap-4">
+    <div className="bg-white rounded-3xl p-6 border border-gray-100 shadow-sm mt-2">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-gray-100 pb-5 mb-5 gap-4">
         <div>
-          <h2 className="text-xl font-bold text-gray-800 dark:text-slate-100">Flagged Garbage Font Queue</h2>
+          <h2 className="text-xl font-bold text-gray-800">Flagged Garbage Font Queue</h2>
           <p className="text-gray-400 text-sm mt-0.5">Pending evaluation entries count: {flaggedData.length}</p>
         </div>
         
         <div className="flex flex-wrap gap-3">
           <button 
             onClick={downloadBulkFlaggedJson}
-            className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-xl shadow-sm transition duration-150 cursor-pointer"
+            className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-xl shadow-sm transition duration-150"
           >
             📥 Download Flagged Data (JSON)
           </button>
@@ -202,40 +187,39 @@ export function FlaggedQuestionsManager() {
 
       <div className="space-y-4 max-h-[600px] overflow-y-auto pr-2">
         {flaggedData.map((q) => (
-          <div key={q.id} className="p-5 rounded-2xl bg-gray-50 dark:bg-slate-850 border border-gray-100 dark:border-slate-800 flex flex-col justify-between gap-4">
-            <div className="space-y-1">
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] uppercase font-bold tracking-wider bg-red-100 dark:bg-red-950 text-red-700 dark:text-red-400 px-2 py-0.5 rounded-md">Flagged Log</span>
-                  <span className="text-xs text-gray-400 dark:text-slate-400 font-medium">Exam: {q.targetExam} | Subject: {q.subject}</span>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <button
-                    disabled={isProcessing === q.id}
-                    onClick={() => handleRestoreQuestion(q)}
-                    className="px-3 py-1 bg-indigo-55 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-100 dark:hover:bg-indigo-900 text-xs font-bold rounded-lg border border-indigo-200 dark:border-indigo-800 transition flex items-center space-x-1 cursor-pointer"
-                  >
-                    <RefreshCw className="h-3 w-3" />
-                    <span>Unflag & Restore</span>
-                  </button>
-                  <button
-                    disabled={isProcessing === q.id}
-                    onClick={() => handleDeleteFlaggedCompletely(q.id)}
-                    className="px-3 py-1 bg-red-50 dark:bg-red-950 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900 text-xs font-bold rounded-lg border border-red-200 dark:border-red-900 transition flex items-center space-x-1 cursor-pointer"
-                  >
-                    <Trash2 className="h-3 w-3" />
-                    <span>Delete Permanently</span>
-                  </button>
-                </div>
+          <div key={q.id} className="p-4 rounded-2xl bg-gray-50 border border-gray-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+            <div className="space-y-1 flex-1">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] uppercase font-bold tracking-wider bg-red-100 text-red-700 px-2 py-0.5 rounded-md">Flagged Log</span>
+                <span className="text-xs text-gray-400 font-medium">Exam: {q.targetExam} | Subject: {q.subject}</span>
               </div>
-              <p className="text-sm font-semibold text-gray-700 dark:text-slate-200 pt-2">{q.questionText}</p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-2 text-xs text-gray-500 dark:text-slate-400">
+              <p className="text-sm font-semibold text-gray-700 pt-1">{q.questionText}</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-2 text-xs text-gray-500">
                 {q.options?.map((opt: string, idx: number) => (
-                  <div key={idx} className={idx === q.correctAnswerIndex ? "text-emerald-600 dark:text-emerald-400 font-bold" : ""}>
+                  <div key={idx} className={idx === q.correctAnswerIndex ? "text-emerald-600 font-bold" : ""}>
                     ({idx + 1}) {opt}
                   </div>
                 ))}
               </div>
+            </div>
+            
+            <div className="flex sm:flex-col gap-2 w-full sm:w-auto shrink-0 border-t sm:border-t-0 pt-3 sm:pt-0 border-gray-200/60">
+              <button
+                onClick={() => handleRestoreQuestion(q)}
+                className="flex-1 sm:flex-initial px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold rounded-xl border border-emerald-200 transition flex items-center justify-center gap-1.5 shadow-sm"
+                title="Restore this question to main active pool and clear flag"
+              >
+                <Check className="w-3.5 h-3.5" />
+                Restore (Unflag)
+              </button>
+              <button
+                onClick={() => handleDeletePermanently(q.id)}
+                className="flex-1 sm:flex-initial px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold rounded-xl border border-rose-200 transition flex items-center justify-center gap-1.5 shadow-sm"
+                title="Permanently delete this question from all databases"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                Purge Forever
+              </button>
             </div>
           </div>
         ))}
@@ -275,7 +259,7 @@ const ExamCounterCard: React.FC<{
             type="text" 
             value={tempName} 
             onChange={(e) => setTempName(e.target.value)}
-            className="w-full text-[10px] font-bold p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-850 outline-none text-slate-800 dark:text-white"
+            className="w-full text-[10px] font-bold p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-850 outline-none"
             placeholder="Exam Name"
             autoFocus
           />
@@ -283,11 +267,11 @@ const ExamCounterCard: React.FC<{
             type="date" 
             value={tempDate} 
             onChange={(e) => setTempDate(e.target.value)}
-            className="w-full text-[10px] font-bold p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-850 outline-none text-slate-800 dark:text-white"
+            className="w-full text-[10px] font-bold p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-850 outline-none"
           />
           <div className="flex space-x-1.5">
-            <button onClick={handleSave} className="flex-1 bg-indigo-600 text-white text-[9px] font-black py-1.5 rounded-lg uppercase transition-colors cursor-pointer">Save</button>
-            <button onClick={() => setIsEditing(false)} className="flex-1 bg-slate-100 dark:bg-slate-800 text-slate-500 text-[9px] font-black py-1.5 rounded-lg uppercase transition-colors cursor-pointer">Cancel</button>
+            <button onClick={handleSave} className="flex-1 bg-indigo-600 text-white text-[9px] font-black py-1.5 rounded-lg uppercase transition-colors">Save</button>
+            <button onClick={() => setIsEditing(false)} className="flex-1 bg-slate-100 dark:bg-slate-800 text-slate-500 text-[9px] font-black py-1.5 rounded-lg uppercase transition-colors">Cancel</button>
           </div>
         </div>
       ) : (
@@ -297,7 +281,7 @@ const ExamCounterCard: React.FC<{
                <Calendar className="h-2.5 w-2.5 text-indigo-500/70" />
                <div className="text-[9px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest truncate max-w-[80px]">{counter.name || "Exam"}</div>
              </div>
-             <button onClick={() => setIsEditing(true)} className="opacity-0 group-hover:opacity-100 p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-all text-slate-400 hover:text-indigo-500 cursor-pointer">
+             <button onClick={() => setIsEditing(true)} className="opacity-0 group-hover:opacity-100 p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition-all text-slate-400 hover:text-indigo-500">
                 <Edit3 className="h-2.5 w-2.5" />
              </button>
           </div>
@@ -347,16 +331,16 @@ const DailyGoalCard: React.FC<{
                     type="number" 
                     value={tempTarget}
                     onChange={(e) => setTempTarget(parseInt(e.target.value) || 0)}
-                    className="w-16 bg-white/10 border border-white/20 rounded px-1.5 py-0.5 text-xs font-bold outline-none text-white"
+                    className="w-16 bg-white/10 border border-white/20 rounded px-1.5 py-0.5 text-xs font-bold outline-none"
                     autoFocus
                    />
-                   <button onClick={() => { onUpdateTarget(tempTarget); setIsEditing(false); }} className="p-1 bg-emerald-500 rounded text-white cursor-pointer"><Check className="h-3 w-3" /></button>
+                   <button onClick={() => { onUpdateTarget(tempTarget); setIsEditing(false); }} className="p-1 bg-emerald-500 rounded text-white"><Check className="h-3 w-3" /></button>
                  </div>
                ) : (
                  <>
                    <div className="text-lg font-black font-display leading-none">{goal.progressToday} / {goal.currentTarget}</div>
                    {goal.streak === 0 && goal.progressToday === 0 && (
-                     <button onClick={() => setIsEditing(true)} className="p-1.5 hover:bg-white/10 rounded-lg transition-colors cursor-pointer">
+                     <button onClick={() => setIsEditing(true)} className="p-1.5 hover:bg-white/10 rounded-lg transition-colors">
                         <Edit3 className="h-3 w-3 opacity-60" />
                      </button>
                    )}
@@ -449,18 +433,6 @@ export default function Dashboard() {
   const [filterSubject, setFilterSubject] = useState("All");
   const [copyingAll, setCopyingAll] = useState<boolean | null>(false);
 
-  // Monitor network connectivity in real-time
-  useEffect(() => {
-    const handleOnline = () => setIsOnline(true);
-    const handleOffline = () => setIsOnline(false);
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
-  }, []);
-
   const copyAllStagedToClipboard = async () => {
     if (stagedQuestions.length === 0) return;
     const text = stagedQuestions.map((q, i) => {
@@ -517,36 +489,24 @@ export default function Dashboard() {
       } catch (e) { console.error(e); }
     }
 
-    // =========================================================
-    // OFFLINE SYNC SYSTEM: LOAD FROM STORAGE INSTANTLY ON MOUNT
-    // =========================================================
-    const offlineCachedQuestions = localStorage.getItem("MOCK_QUESTIONS");
-    if (offlineCachedQuestions) {
-      try {
-        setQuestions(JSON.parse(offlineCachedQuestions));
-      } catch (e) {
-        setQuestions(SAMPLE_QUESTIONS);
-      }
-    } else {
-      setQuestions(SAMPLE_QUESTIONS);
-    }
-
     console.log("Listening to Firestore real-time updates...");
     const q = query(collection(db, "questions"));
     
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      if (!snapshot.empty) {
-        const firestoreQuestions = snapshot.docs.map(doc => ({
-          ...doc.data(),
-          firestoreId: doc.id,
-          id: doc.data().id || doc.id
-        })) as Question[];
-        
-        setQuestions(firestoreQuestions);
-        localStorage.setItem("MOCK_QUESTIONS", JSON.stringify(firestoreQuestions));
-      }
+      const firestoreQuestions = snapshot.docs.map(doc => ({
+        ...doc.data(),
+        firestoreId: doc.id,
+        id: doc.data().id || doc.id
+      })) as Question[];
+      
+      setQuestions(firestoreQuestions);
+      localStorage.setItem("MOCK_QUESTIONS", JSON.stringify(firestoreQuestions));
     }, (error) => {
-      console.warn("Firestore listener fallback triggered (Offline Mode active):", error);
+      console.error("Firestore real-time sync failure:", error);
+      const storedQuestions = localStorage.getItem("MOCK_QUESTIONS");
+      if (storedQuestions) {
+        setQuestions(JSON.parse(storedQuestions));
+      }
     });
 
     const storedAttempts = localStorage.getItem('MOCK_ATTEMPTS');
@@ -612,6 +572,58 @@ export default function Dashboard() {
     return () => unsubscribe();
   }, []);
 
+  // Online/Offline status check and offline creation sync trigger
+  useEffect(() => {
+    const handleOnline = async () => {
+      setIsOnline(true);
+      
+      const offlineQsStr = localStorage.getItem('MOCK_OFFLINE_QUESTIONS');
+      if (offlineQsStr) {
+        try {
+          const offlineQs = JSON.parse(offlineQsStr) as Question[];
+          if (offlineQs.length > 0) {
+            console.log(`Syncing ${offlineQs.length} offline questions...`);
+            const batch = writeBatch(db);
+            offlineQs.forEach(q => {
+              batch.set(doc(db, "questions", q.id), {
+                id: q.id,
+                questionText: q.questionText,
+                options: q.options,
+                correctAnswerIndex: q.correctAnswerIndex,
+                explanation: q.explanation || "",
+                subject: q.subject || "General",
+                createdAt: new Date().toISOString()
+              });
+            });
+            await batch.commit();
+            localStorage.setItem('MOCK_OFFLINE_QUESTIONS', JSON.stringify([]));
+            alert(`Offline Sync successful! ${offlineQs.length} custom question(s) synced back to secure database servers!`);
+          }
+        } catch (e) {
+          console.error("Critical: Error during online database sync orchestration:", e);
+        }
+      }
+    };
+
+    const handleOffline = () => {
+      setIsOnline(false);
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    if (navigator.onLine) {
+      handleOnline();
+    } else {
+      setIsOnline(false);
+    }
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
   // Handles updating the dynamic tags list
   const handleAddNewSubjectTag = (e: React.FormEvent) => {
     e.preventDefault();
@@ -627,6 +639,7 @@ export default function Dashboard() {
     setSubjectTagsList(updatedTags);
     localStorage.setItem('MOCK_SUBJECT_TAGS', JSON.stringify(updatedTags));
     
+    // Auto shift selected target to the newly created tag and freeze it
     setStagingSubject(cleanTag);
     localStorage.setItem('MOCK_STICKY_UPLOAD_TAG', cleanTag);
     
@@ -775,19 +788,17 @@ export default function Dashboard() {
     setImportSuccess(null);
 
     try {
-      if (isOnline) {
-        const questionCollection = collection(db, 'questions');
-        const total = prepared.length;
-        for (let i = 0; i < total; i++) {
-          await addDoc(questionCollection, prepared[i]);
-          setSavingProgress(Math.round(((i + 1) / total) * 100));
-        }
+      const questionCollection = collection(db, 'questions');
+      const total = prepared.length;
+      for (let i = 0; i < total; i++) {
+        await addDoc(questionCollection, prepared[i]);
+        setSavingProgress(Math.round(((i + 1) / total) * 100));
       }
       
       const nextQList = [...questions, ...prepared];
       saveQuestionsToDB(nextQList);
       
-      setImportSuccess(`Successfully added ${prepared.length} questions to ${stagingSubject} locally!`);
+      setImportSuccess(`Successfully added ${prepared.length} questions to ${stagingSubject}!`);
       setStagedQuestions([]);
       setTimeout(() => {
         setIsUploadModalOpen(false);
@@ -796,11 +807,19 @@ export default function Dashboard() {
         setSavingProgress(0);
       }, 3000);
     } catch (error: any) {
-      console.error("Firestore Upload Error details:", error);
-      alert(`Firebase connection error. Stored offline safely.`);
-      const nextQList = [...questions, ...prepared];
-      saveQuestionsToDB(nextQList);
+      console.error("Full Firestore Error details:", error);
+      alert(`Firebase Error. Please check your configurations.`);
       setIsSaving(false);
+    }
+  };
+
+  const queueOfflineQuestion = (q: Question) => {
+    try {
+      const offlineQs = JSON.parse(localStorage.getItem('MOCK_OFFLINE_QUESTIONS') || '[]');
+      offlineQs.push(q);
+      localStorage.setItem('MOCK_OFFLINE_QUESTIONS', JSON.stringify(offlineQs));
+    } catch (e) {
+      console.error("Failed to queue offline question:", e);
     }
   };
 
@@ -822,40 +841,53 @@ export default function Dashboard() {
       options: [...newOptions],
       correctAnswerIndex: newCorrectIndex,
       subject: newSubject.trim() || "General",
-      explanation: newExplanation.trim() || undefined
+      explanation: newExplanation.trim() || ""
     };
+
+    // Store in local active memory states to keep active state fresh instantly
+    saveQuestionsToDB([...questions, created]);
 
     if (isOnline) {
       try {
-        await addDoc(collection(db, 'questions'), created);
-      } catch (err) { 
-        console.error("Cloud push delayed (Offline mode active):", err); 
+        await setDoc(doc(db, "questions", created.id), {
+          id: created.id,
+          questionText: created.questionText,
+          options: created.options,
+          correctAnswerIndex: created.correctAnswerIndex,
+          explanation: created.explanation,
+          subject: created.subject,
+          createdAt: new Date().toISOString()
+        });
+        alert("New question successfully saved to cloud database!");
+      } catch (err) {
+        console.error("Firestore save error, falling back to offline queue:", err);
+        queueOfflineQuestion(created);
+        alert("Saved locally! Question will sync to cloud when connection is restored.");
       }
+    } else {
+      queueOfflineQuestion(created);
+      alert("Offline mode active! Question saved locally and queued for automatic sync.");
     }
 
-    saveQuestionsToDB([...questions, created]);
     setIsFormOpen(false);
     setNewQText("");
     setNewOptions(["", "", "", ""]);
     setNewCorrectIndex(0);
     setNewExplanation("");
-    
-    alert("New custom question successfully committed!");
   };
 
   const handleDeleteFromBank = async (id: string) => {
-    if (!window.confirm("Are you sure you want to remove this question?")) return;
-    
-    if (isOnline) {
-      try {
-        await deleteDoc(doc(db, "questions", id));
-      } catch (err) { 
-        console.error("Firebase item delete failed:", err); 
+    if (window.confirm("Are you sure you want to remove this question?")) {
+      const next = questions.filter(q => q.id !== id);
+      saveQuestionsToDB(next);
+      if (isOnline) {
+        try {
+          await deleteDoc(doc(db, "questions", id));
+        } catch (err) {
+          console.error("Failed to delete from Firestore:", err);
+        }
       }
     }
-    
-    const next = questions.filter(q => q.id !== id);
-    saveQuestionsToDB(next);
   };
 
   const handlePrepareQuiz = () => {
@@ -924,13 +956,26 @@ export default function Dashboard() {
     localStorage.setItem('MOCK_REVIEW_STATES', JSON.stringify(updatedLocalReview));
   };
 
-  const availableSubjects = Array.from(new Set(questions.map(q => q.subject).filter(Boolean)));
-  const filteredQuestions = questions.filter(q => {
-    const matchSearch = q.questionText.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                        q.options.some(opt => opt.toLowerCase().includes(searchQuery.toLowerCase()));
-    const matchFilter = filterSubject === "All" || q.subject.toLowerCase() === filterSubject.toLowerCase();
-    return matchSearch && matchFilter;
-  });
+  const getAvailableSubjects = () => {
+    const list = new Set<string>();
+    questions.forEach(q => {
+      if (q.subject) list.add(q.subject);
+    });
+    return Array.from(list);
+  };
+
+  const availableSubjects = getAvailableSubjects();
+
+  const getFilteredQuestions = () => {
+    return questions.filter(q => {
+      const matchSearch = q.questionText.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                          q.options.some(opt => opt.toLowerCase().includes(searchQuery.toLowerCase()));
+      const matchFilter = filterSubject === "All" || q.subject.toLowerCase() === filterSubject.toLowerCase();
+      return matchSearch && matchFilter;
+    });
+  };
+
+  const filteredQuestions = getFilteredQuestions();
 
   const totalTests = attempts.length;
   const avgAccuracy = totalTests > 0 
@@ -997,16 +1042,22 @@ export default function Dashboard() {
             </div>
             <div>
               <h1 className="text-xl font-black tracking-tight text-indigo-900 dark:text-indigo-400 font-display">AT <span className="text-indigo-500 font-black">MOCK</span></h1>
-              <p className="text-[10px] text-slate-400 dark:text-slate-500 font-black uppercase tracking-widest leading-none mt-0.5">AT MOCK</p>
             </div>
           </div>
 
           <div className="flex items-center space-x-4">
-            <div className="flex items-center space-x-1.5 border border-slate-100 dark:border-slate-800 rounded-full px-3 py-1 bg-slate-50 dark:bg-slate-850 text-xs font-medium">
-              <Wifi className={`h-3.5 w-3.5 ${isOnline ? 'text-emerald-500 animate-pulse' : 'text-amber-500'}`} />
-              <span className="text-slate-500 dark:text-slate-450 text-[10px] font-bold uppercase tracking-wider">
-                {isOnline ? 'Cloud Sync Connected' : 'Offline Workspace Active'}
-              </span>
+            <div className="flex items-center space-x-1.5 border border-slate-100 dark:border-slate-200 rounded-full px-3 py-1 bg-slate-50 dark:bg-slate-850 text-xs font-medium">
+              {isOnline ? (
+                <>
+                  <Wifi className="h-3.5 w-3.5 text-emerald-500 animate-pulse" />
+                  <span className="text-emerald-900 dark:text-emerald-900 text-[9px] font-bold uppercase tracking-wider">Online</span>
+                </>
+              ) : (
+                <>
+                  <Wifi className="h-3.5 w-3.5 text-amber-500" />
+                  <span className="text-amber-900 dark:text-amber-900 text-[9px] font-bold uppercase tracking-wider">Offline </span>
+                </>
+              )}
             </div>
 
             <button 
@@ -1089,6 +1140,7 @@ export default function Dashboard() {
                   </div>
                 </button>
 
+                {/* 🚩 DYNAMIC NAVIGATION ROUTE TRIGGER INTEGRATION */}
                 {isAdminAuthenticated && (
                   <button
                     onClick={() => { setActiveTab('flagged-manager'); setReviewedAttempt(null); setIsWorkspaceMenuOpen(false); }}
@@ -1111,7 +1163,7 @@ export default function Dashboard() {
             
             {/* Direct Test Review view if user clicked active log */}
             {reviewedAttempt && activeTab === 'review' ? (
-              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-6 transition-all duration-150 animate-fade-in">
+              <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-6 transition-all duration-150">
                 <div className="flex items-center space-x-2.5 mb-6 text-slate-500">
                   <button 
                     onClick={() => { setReviewedAttempt(null); setActiveTab('analytics'); }}
@@ -1169,7 +1221,7 @@ export default function Dashboard() {
                 <h4 className="text-xs font-bold text-slate-400 border-b border-slate-100 dark:border-slate-850 pb-2 mb-4 tracking-wider uppercase">Question-by-Question Diagnostic Review</h4>
                 
                 {reviewedAttempt.answers.length === 0 ? (
-                  <div className="text-center p-8 border border-dashed rounded-xl border-slate-200 dark:border-slate-800">
+                  <div className="text-center p-8 border rounded-xl border-dashed">
                     <AlertCircle className="h-8 w-8 text-slate-400 mx-auto mb-2" />
                     <span className="text-xs text-slate-500 font-medium">Question review sheets are generated on active test submissions.</span>
                   </div>
@@ -1248,7 +1300,7 @@ export default function Dashboard() {
             ) : null}
 
             {activeTab === 'mock-config' && !reviewedAttempt ? (
-              <div className="space-y-6 animate-fade-in">
+              <div className="space-y-6">
                 <div>
                   <h4 className="text-[10px] font-black text-slate-400 dark:text-slate-500 tracking-[0.2em] uppercase mb-2 ml-1 font-display">Target Exam Countdowns</h4>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
@@ -1264,9 +1316,9 @@ export default function Dashboard() {
 
                 <DailyGoalCard goal={dailyGoal} onUpdateTarget={handleUpdateDailyBaseTarget} />
 
-                <div className="grid grid-cols-3 gap-3 animate-fade-in shadow-sm text-slate-800 dark:text-slate-200">
+                <div className="grid grid-cols-3 gap-3 animate-fade-in shadow-sm">
                   <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-3 rounded-xl">
-                    <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 leading-none truncate">Questions Loaded</div>
+                    <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 leading-none truncate">Questions</div>
                     <div className="text-lg font-black text-indigo-600 dark:text-indigo-400 font-display leading-none">{questions.length}</div>
                   </div>
                   <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-3 rounded-xl">
@@ -1274,49 +1326,59 @@ export default function Dashboard() {
                     <div className="text-lg font-black text-rose-500 font-display leading-none">{attempts.length}</div>
                   </div>
                   <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-3 rounded-xl">
-                    <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 leading-none truncate">Average Accuracy</div>
+                    <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 leading-none truncate">Accuracy</div>
                     <div className="text-lg font-black text-emerald-500 font-display leading-none">{avgAccuracy}%</div>
                   </div>
                 </div>
 
-                <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] p-8 shadow-xl border border-indigo-50 dark:border-slate-800/80 flex flex-col justify-between transition-all">
+                <div className="relative rounded-2xl bg-gradient-to-r from-indigo-700 via-indigo-600 to-indigo-850 p-6 text-white overflow-hidden shadow-xl shadow-indigo-550/20 border border-indigo-500/10">
+                  <div className="absolute top-0 right-0 transform translate-x-3 -translate-y-3 shrink-0 opacity-10">
+                    <Sparkles className="h-14 w-14 text-white" />
+                  </div>
+                  <div className="flex items-center space-x-3">
+                    <Zap className="h-4 w-4 text-emerald-300 animate-pulse" />
+                    <span className="text-[11px] font-black tracking-[0.2em] uppercase font-display"> MOCK Simulator Ready</span>
+                  </div>
+                </div>
+
+                <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] p-8 shadow-xl shadow-indigo-105/30 border border-indigo-50 dark:border-slate-800/80 flex flex-col justify-between transition-all">
                   <div className="flex justify-between items-start mb-6 border-b border-slate-100 dark:border-slate-800/50 pb-4">
                     <div>
                       <h3 className="text-xl font-black tracking-tight font-display">Launch New Mock Test</h3>
-                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Configure assessment parameters offline or online</p>
+                      
                     </div>
                     <div className="bg-indigo-50 dark:bg-indigo-950/40 p-2 rounded-xl border border-indigo-100 dark:border-indigo-900">
-                      <Settings className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                      <Settings className="w-5 h-5 text-black-700 dark:text-black-800" />
                     </div>
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                    <div className="space-y-6 w-full md:col-span-2">
+                    <div className="space-y-6">
                       <div>
-                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2.5 ml-1">Practice Subject</label>
+                        <label className="block text-[10px] font-black text-slate-800 uppercase tracking-widest mb-2.5 ml-1">Practice Subject</label>
                         <div className="relative">
                           <select 
                             value={quizSubject}
                             onChange={(e) => setQuizSubject(e.target.value)}
-                            className="w-full bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-750 px-4 py-3.5 rounded-2xl text-xs font-bold appearance-none outline-none focus:ring-2 focus:ring-indigo-500/20 text-slate-800 dark:text-white"
+                            className="w-full bg-slate-50 dark:bg-slate-150 border border-slate-100 dark:border-slate-150 px-4 py-3.5 rounded-2xl text-xs font-bold appearance-none outline-none focus:ring-2 focus:ring-indigo-500/20"
                           >
                             <option>All Subjects</option>
                             {availableSubjects.map(sub => (
                               <option key={sub} value={sub}>{sub}</option>
                             ))}
                           </select>
-                          <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                          <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-black-900 pointer-events-none" />
                         </div>
                       </div>
 
                       <div className="grid grid-cols-2 gap-4">
                         <div>
-                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2.5 ml-1">Question Count</label>
+                          <label className="block text-[10px] font-black text-slate-800 uppercase tracking-widest mb-2.5 ml-1">Question Count</label>
                           <input 
                             type="number"
                             value={quizCount}
                             onChange={(e) => setQuizCount(Math.max(1, parseInt(e.target.value) || 0))}
-                            className="w-full bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-750 px-4 py-3.5 rounded-2xl text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500/20 text-slate-800 dark:text-white"
+                            className="w-full bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-black-750 px-4 py-3.5 rounded-2xl text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500/20"
                           />
                         </div>
                         <div>
@@ -1326,7 +1388,7 @@ export default function Dashboard() {
                             value={timerMinutes}
                             max={180}
                             onChange={(e) => setTimerMinutes(Math.min(180, Math.max(1, parseInt(e.target.value) || 0)))}
-                            className="w-full bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-750 px-4 py-3.5 rounded-2xl text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500/20 text-slate-800 dark:text-white"
+                            className="w-full bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-black-750 px-4 py-3.5 rounded-2xl text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500/20"
                             disabled={!hasTimer}
                           />
                         </div>
@@ -1385,7 +1447,7 @@ export default function Dashboard() {
                         durationMinutes: Math.ceil(selected.length * 1.5)
                       });
                     }}
-                    className="flex items-center justify-center space-x-2 bg-rose-600 text-white font-black text-xs py-3.5 px-6 rounded-2xl shadow-lg hover:bg-rose-700 transition active:scale-95 cursor-pointer"
+                    className="flex items-center justify-center space-x-2 bg-rose-600 text-white font-black text-xs py-3.5 px-6 rounded-2xl shadow-lg shadow-rose-100 dark:shadow-none hover:bg-rose-700 transition active:scale-95"
                   >
                     <Zap className="w-4 h-4" />
                     <span>START REVIEW MOCK (MAX 20)</span>
@@ -1408,7 +1470,7 @@ export default function Dashboard() {
                            )}
                            <button 
                              onClick={() => toggleBookmark(q.id)}
-                             className={`h-8 w-8 rounded-xl flex items-center justify-center transition-all cursor-pointer ${
+                             className={`h-8 w-8 rounded-xl flex items-center justify-center transition-all ${
                                localReviewBank[q.id]?.isBookmarked ? 'bg-amber-100 text-amber-600 border border-amber-200' : 'bg-slate-50 dark:bg-slate-850 text-slate-400 border border-slate-200 dark:border-slate-750'
                              }`}
                            >
@@ -1451,12 +1513,12 @@ export default function Dashboard() {
             )}
 
             {activeTab === 'questions' && !reviewedAttempt ? (
-              <div className="space-y-6 animate-fade-in">
+              <div className="space-y-6">
                 <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-6 shadow-sm transition-colors">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div>
                       <h4 className="text-sm font-bold tracking-tight">Question Bank Database Console</h4>
-                      <p className="text-[11px] text-slate-400 mt-0.5">Edit, add, or delete single questions in your local or remote database layers.</p>
+                      <p className="text-[11px] text-slate-400 mt-0.5">Edit, add, or delete single questions in your database.</p>
                     </div>
 
                     <button
@@ -1480,7 +1542,7 @@ export default function Dashboard() {
                             value={newSubject}
                             onChange={(e) => setNewSubject(e.target.value)}
                             placeholder="e.g. Mathematics, Programming..."
-                            className="w-full text-xs font-semibold h-10 border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 rounded-xl px-3 outline-none text-slate-800 dark:text-white"
+                            className="w-full text-xs font-semibold h-10 border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 rounded-xl px-3 outline-none"
                           />
                         </div>
                         <div>
@@ -1488,7 +1550,7 @@ export default function Dashboard() {
                           <select
                             value={newCorrectIndex}
                             onChange={(e) => setNewCorrectIndex(parseInt(e.target.value) || 0)}
-                            className="w-full text-xs font-semibold h-10 border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 rounded-xl px-3 outline-none text-slate-800 dark:text-white"
+                            className="w-full text-xs font-semibold h-10 border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 rounded-xl px-3 outline-none"
                           >
                             <option value="0">Option A is Correct Answer</option>
                             <option value="1">Option B is Correct Answer</option>
@@ -1505,7 +1567,7 @@ export default function Dashboard() {
                           value={newQText}
                           onChange={(e) => setNewQText(e.target.value)}
                           placeholder="Type your question statement here..."
-                          className="w-full text-xs font-semibold p-2.5 bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-700 rounded-xl outline-none resize-none text-slate-800 dark:text-white"
+                          className="w-full text-xs font-semibold p-2.5 bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-700 rounded-xl outline-none resize-none"
                         />
                       </div>
 
@@ -1522,7 +1584,7 @@ export default function Dashboard() {
                                 setNewOptions(next);
                               }}
                               placeholder={`Option label ${String.fromCharCode(65 + idx)}...`}
-                              className="w-full text-xs font-semibold h-9 border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 rounded-xl px-3 outline-none text-slate-800 dark:text-white"
+                              className="w-full text-xs font-semibold h-9 border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 rounded-xl px-3 outline-none"
                             />
                           </div>
                         ))}
@@ -1535,7 +1597,7 @@ export default function Dashboard() {
                           value={newExplanation}
                           onChange={(e) => setNewExplanation(e.target.value)}
                           placeholder="Provide descriptive reasoning or solutions steps..."
-                          className="w-full text-xs font-semibold h-9 border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 rounded-xl px-3 outline-none text-slate-800 dark:text-white"
+                          className="w-full text-xs font-semibold h-9 border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 rounded-xl px-3 outline-none"
                         />
                       </div>
 
@@ -1543,7 +1605,7 @@ export default function Dashboard() {
                         <button
                           type="button"
                           onClick={() => setIsFormOpen(false)}
-                          className="h-9 px-4 border border-slate-200 dark:border-slate-700 text-xs font-semibold rounded-lg hover:bg-slate-50 cursor-pointer"
+                          className="h-9 px-4 border border-slate-200 dark:border-slate-700 text-xs font-semibold rounded-lg hover:bg-slate-50"
                         >
                           Discard
                         </button>
@@ -1558,7 +1620,7 @@ export default function Dashboard() {
                   )}
                 </div>
 
-                <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-4 card-row">
                   <div className="relative flex-1 w-full">
                     <Search className="absolute left-3 top-3.5 h-3.5 w-3.5 text-slate-400 shrink-0" />
                     <input
@@ -1566,7 +1628,7 @@ export default function Dashboard() {
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
                       placeholder="Search questions by key text description..."
-                      className="w-full text-xs font-semibold h-10 pl-9 pr-3 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 rounded-xl outline-none text-slate-800 dark:text-white"
+                      className="w-full text-xs font-semibold h-10 pl-9 pr-3 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 rounded-xl outline-none"
                     />
                   </div>
 
@@ -1575,7 +1637,7 @@ export default function Dashboard() {
                     <select
                       value={filterSubject}
                       onChange={(e) => setFilterSubject(e.target.value)}
-                      className="w-full sm:w-44 text-xs font-semibold h-10 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 rounded-xl px-3 outline-none text-slate-800 dark:text-white"
+                      className="w-full sm:w-44 text-xs font-semibold h-10 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 rounded-xl px-3 outline-none"
                     >
                       <option value="All">All Subjects</option>
                       {availableSubjects.map((sub, idx) => (
@@ -1599,7 +1661,7 @@ export default function Dashboard() {
                       return (
                         <div 
                           key={q.id}
-                          className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 sm:p-5 rounded-2xl flex flex-col justify-between hover:border-slate-300 shadow-sm transition-all"
+                          className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 sm:p-5 rounded-2xl flex flex-col justify-between hover:border-slate-300 dark:hover:border-slate-705 shadow-sm transition-all"
                         >
                           <div>
                             <div className="flex items-center justify-between mb-3.5">
@@ -1607,8 +1669,8 @@ export default function Dashboard() {
                               <div className="flex items-center space-x-2">
                                 <button
                                   onClick={() => toggleBookmark(q.id)}
-                                  className={`p-1.5 rounded-md transition-all cursor-pointer ${
-                                    isBookmarked ? 'bg-amber-100 text-amber-600 border border-amber-200' : 'text-slate-400 hover:text-amber-500 hover:bg-amber-50'
+                                  className={`p-1.5 rounded-md transition-all ${
+                                    isBookmarked ? 'bg-amber-100 text-amber-600 border border-amber-200' : 'text-slate-400 hover:text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-950/20'
                                   }`}
                                   title="Bookmark for review"
                                 >
@@ -1616,7 +1678,7 @@ export default function Dashboard() {
                                 </button>
                                 <button
                                   onClick={() => handleDeleteFromBank(q.id)}
-                                  className="text-slate-400 hover:text-red-500 p-1.5 rounded-md hover:bg-rose-50 transition cursor-pointer"
+                                  className="text-slate-450 hover:text-red-500 p-1.5 rounded-md hover:bg-rose-50 dark:hover:bg-rose-950/20 transition cursor-pointer"
                                   title="Remove question"
                                 >
                                   <Trash2 className="h-3.5 w-3.5 hover:scale-110 active:scale-95" />
@@ -1650,7 +1712,7 @@ export default function Dashboard() {
                           </div>
 
                           {q.explanation && (
-                            <div className="p-3 bg-slate-100/50 dark:bg-slate-800/40 rounded-xl text-[10px] text-slate-500 dark:text-slate-400 mt-2 border border-slate-150/40 leading-relaxed">
+                            <div className="p-3 bg-slate-100/50 dark:bg-slate-800/40 rounded-xl text-[10px] text-slate-500 dark:text-slate-400 mt-2 border border-slate-150/40 dark:border-slate-850/40 leading-relaxed">
                               <strong>Step Explanation:</strong> <FormattedText text={q.explanation} className="inline" />
                             </div>
                           )}
@@ -1662,13 +1724,13 @@ export default function Dashboard() {
               </div>
             ) : null}
 
-            {/* Analytics page tab */}
+            {/* TAB 4: Analytics page */}
             {activeTab === 'analytics' && !reviewedAttempt ? (
-              <div className="space-y-6 animate-fade-in">
+              <div className="space-y-6">
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4.5 rounded-2xl shadow-sm text-center">
                     <span className="text-[10px] text-slate-400 block font-bold tracking-widest uppercase">Total Mock attempts</span>
-                    <span className="text-xl font-extrabold mt-1 block text-slate-800 dark:text-slate-100">{totalTests} Trials</span>
+                    <span className="text-xl font-extrabold mt-1 block">{totalTests} Trials</span>
                   </div>
                   <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4.5 rounded-2xl shadow-sm text-center">
                     <span className="text-[10px] text-slate-400 block font-bold tracking-widest uppercase">Average Accuracy</span>
@@ -1680,7 +1742,7 @@ export default function Dashboard() {
                   </div>
                   <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4.5 rounded-2xl shadow-sm text-center">
                     <span className="text-[10px] text-slate-400 block font-bold tracking-widest uppercase">Average Speed</span>
-                    <span className="text-xl font-extrabold mt-1 block text-slate-800 dark:text-slate-100">{avgSpeedSec}s / Q</span>
+                    <span className="text-xl font-extrabold mt-1 block">{avgSpeedSec}s / Q</span>
                   </div>
                 </div>
 
@@ -1730,7 +1792,7 @@ export default function Dashboard() {
                     <div className="text-xs p-5 text-center text-slate-450">No historical exam registers found.</div>
                   ) : (
                     <div className="overflow-x-auto">
-                      <table className="w-full text-left text-xs border-collapse text-slate-800 dark:text-slate-200">
+                      <table className="w-full text-left text-xs border-collapse">
                         <thead>
                           <tr className="border-b border-slate-100 dark:border-slate-800 text-slate-400 font-bold select-none">
                             <th className="py-3 px-2">Assigned Subject</th>
@@ -1746,7 +1808,7 @@ export default function Dashboard() {
                             return (
                               <tr key={att.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-850/20 transition-all">
                                 <td className="py-3 px-2 font-bold">{att.subject}</td>
-                                <td className="py-3 px-2 text-slate-450 dark:text-slate-400">{dateObj.toLocaleDateString()} {dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
+                                <td className="py-3 px-2 text-slate-450">{dateObj.toLocaleDateString()} {dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</td>
                                 <td className="py-3 px-2 text-center">
                                   <span className={`px-2 py-0.5 rounded-full font-bold font-mono ${
                                     att.scorePercentage >= 80 ? 'bg-emerald-500/10 text-emerald-500' :
@@ -1778,6 +1840,7 @@ export default function Dashboard() {
               </div>
             ) : null}
 
+            {/* 🚩 LIVE NAVIGATION MANAGER ROUTE INTERACTION ELEMENT */}
             {activeTab === 'flagged-manager' && isAdminAuthenticated && (
               <FlaggedQuestionsManager />
             )}
@@ -1791,15 +1854,15 @@ export default function Dashboard() {
           <span>&copy; Made by Akash Chaudhary for his Beautiful Wife ,Trishna</span>
           <span className="flex items-center space-x-1 border border-slate-200 dark:border-slate-800 rounded px-2.5 py-0.5 bg-slate-50 dark:bg-slate-950 font-bold text-[10px]">
             <Check className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
-            <span>100% Sync Verified Workspace Engine</span>
+            <span>100% Cloud Synchronized Practice Ready</span>
           </span>
         </div>
       </footer>
 
       {/* GLOBAL MODALS */}
       {isAdminModalOpen && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm" onClick={() => setIsAdminModalOpen(false)}>
-          <div className="bg-white dark:bg-slate-900 w-full max-w-sm rounded-[2.5rem] shadow-2xl border border-white/20 dark:border-slate-800 overflow-hidden" onClick={e => e.stopPropagation()}>
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200" onClick={() => setIsAdminModalOpen(false)}>
+          <div className="bg-white dark:bg-slate-900 w-full max-w-sm rounded-[2.5rem] shadow-2xl border border-white/20 overflow-hidden animate-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
             <div className="p-8">
               <div className="flex justify-between items-center mb-6">
                 <div className="flex items-center space-x-3">
@@ -1811,7 +1874,7 @@ export default function Dashboard() {
                     <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest leading-none mt-1">Management Portal</p>
                   </div>
                 </div>
-                <button onClick={() => setIsAdminModalOpen(false)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors cursor-pointer">
+                <button onClick={() => setIsAdminModalOpen(false)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors">
                   <X className="h-5 w-5 text-slate-400" />
                 </button>
               </div>
@@ -1834,7 +1897,7 @@ export default function Dashboard() {
                           }
                         }
                       }}
-                      className={`w-full bg-slate-50 dark:bg-slate-850 border ${adminError ? 'border-rose-300 ring-4 ring-rose-500/10' : 'border-slate-200 dark:border-slate-800'} px-5 py-4 rounded-2xl text-sm font-bold outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all text-slate-800 dark:text-white`}
+                      className={`w-full bg-slate-50 dark:bg-slate-850 border ${adminError ? 'border-rose-300 ring-4 ring-rose-500/10' : 'border-slate-200 dark:border-slate-800'} px-5 py-4 rounded-2xl text-sm font-bold outline-none focus:ring-4 focus:ring-indigo-500/10 transition-all`}
                       placeholder="••••••"
                       autoFocus
                     />
@@ -1849,7 +1912,7 @@ export default function Dashboard() {
                         setAdminError(true);
                       }
                     }}
-                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs py-4 rounded-2xl shadow-xl transition-all active:scale-95 cursor-pointer"
+                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs py-4 rounded-2xl shadow-xl shadow-indigo-200 dark:shadow-none transition-all active:scale-95"
                   >
                     LOGIN TO ADMIN
                   </button>
@@ -1864,9 +1927,9 @@ export default function Dashboard() {
                          value={newCustomTagInput} 
                          onChange={(e) => setNewCustomTagInput(e.target.value)}
                          placeholder="e.g. Geography Level 1" 
-                         className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-[11px] font-bold px-2.5 py-1.5 rounded-xl outline-none text-slate-800 dark:text-white"
+                         className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-[11px] font-bold px-2.5 py-1.5 rounded-xl outline-none"
                        />
-                       <button type="submit" className="bg-indigo-600 hover:bg-indigo-700 text-white p-2 rounded-xl transition-all cursor-pointer">
+                       <button type="submit" className="bg-indigo-600 hover:bg-indigo-700 text-white p-2 rounded-xl transition-all">
                          <Plus className="w-3.5 h-3.5" />
                        </button>
                      </div>
@@ -1874,7 +1937,7 @@ export default function Dashboard() {
 
                    <button
                     onClick={() => { setActiveTab('questions'); setReviewedAttempt(null); setIsAdminModalOpen(false); }}
-                    className="flex items-center space-x-4 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-850 hover:bg-indigo-50 dark:hover:bg-indigo-950/20 hover:border-indigo-200 transition-all text-left cursor-pointer"
+                    className="flex items-center space-x-4 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-850 hover:bg-indigo-50 dark:hover:bg-indigo-950/20 hover:border-indigo-200 transition-all text-left"
                   >
                     <div className="bg-white dark:bg-slate-900 p-2 rounded-xl shadow-sm border border-slate-100 dark:border-slate-800">
                       <LayoutGrid className="h-5 w-5 text-indigo-600" />
@@ -1887,7 +1950,7 @@ export default function Dashboard() {
 
                   <button
                     onClick={() => { setIsUploadModalOpen(true); setIsAdminModalOpen(false); }}
-                    className="flex items-center space-x-4 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-850 hover:bg-indigo-50 dark:hover:bg-indigo-950/20 hover:border-indigo-200 transition-all text-left cursor-pointer"
+                    className="flex items-center space-x-4 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-850 hover:bg-indigo-50 dark:hover:bg-indigo-950/20 hover:border-indigo-200 transition-all text-left"
                   >
                     <div className="bg-white dark:bg-slate-900 p-2 rounded-xl shadow-sm border border-slate-100 dark:border-slate-800">
                       <FileCode className="h-5 w-5 text-indigo-600" />
@@ -1900,7 +1963,7 @@ export default function Dashboard() {
 
                   <button
                     onClick={() => { handleResetDatabase(); setIsAdminModalOpen(false); }}
-                    className="flex items-center space-x-4 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-850 hover:bg-rose-50 dark:hover:bg-rose-950/20 hover:border-rose-200 transition-all text-left group cursor-pointer"
+                    className="flex items-center space-x-4 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-850 hover:bg-rose-50 dark:hover:bg-rose-950/20 hover:border-rose-200 transition-all text-left group"
                   >
                     <div className="bg-white dark:bg-slate-900 p-2 rounded-xl shadow-sm border border-slate-100 dark:border-slate-800">
                       <Trash2 className="h-5 w-5 text-rose-500 group-hover:scale-110 transition-transform" />
@@ -1913,7 +1976,7 @@ export default function Dashboard() {
 
                   <button 
                     onClick={() => setIsAdminAuthenticated(false)}
-                    className="mt-4 py-2 border border-slate-100 dark:border-slate-800 rounded-xl text-[9px] font-black text-slate-400 hover:text-rose-500 uppercase tracking-widest text-center transition-colors cursor-pointer"
+                    className="mt-4 py-2 border border-slate-100 dark:border-slate-800 rounded-xl text-[9px] font-black text-slate-400 hover:text-rose-500 uppercase tracking-widest text-center transition-colors"
                   >
                     Sign Out Administrator
                   </button>
@@ -1975,7 +2038,7 @@ export default function Dashboard() {
                 ) : (
                   <>
                     <UploadCloud className="h-10 w-10 text-slate-400 group-hover:text-indigo-650 mx-auto mb-3 transition-colors shrink-0" />
-                    <span className="text-sm font-black block mb-1 text-slate-700 dark:text-slate-300 group-hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors font-display">Drag and Drop HTML mockup files here</span>
+                    <span className="text-sm font-black block mb-1 text-slate-700 dark:text-slate-300 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors font-display">Drag and Drop HTML mockup files here</span>
                     <span className="text-xs text-slate-400 dark:text-slate-500 block">or click to browse your folders (Accepts bulk .html files)</span>
                   </>
                 )}
@@ -1991,7 +2054,7 @@ export default function Dashboard() {
                 </div>
               )}
 
-              {/* Target Subject Selector Dropdown Module */}
+              {/* Dynamic / Persistent Target Subject Selector Dropdown Module */}
               <div className="pt-4">
                 <label className="text-xs font-black text-slate-400 dark:text-slate-500 block mb-2 uppercase font-display">Target Subject Tag (Fixed Selection)</label>
                 <div className="flex items-center space-x-3">
@@ -2008,16 +2071,16 @@ export default function Dashboard() {
                      <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" />
                    </div>
                    <span className="text-[10px] text-slate-400 hidden sm:block max-w-xs leading-tight">
-                     These files will map to <strong className="text-indigo-500">{stagingSubject}</strong>.
+                     These files will map to <strong className="text-indigo-500">{stagingSubject}</strong>. (This target remains frozen for bulk sets until updated).
                    </span>
                 </div>
               </div>
 
-              {/* Staging Queue Render */}
+              {/* Staging Render */}
               {stagedQuestions.length > 0 && (
                 <div className="mt-6 border-t border-slate-100 dark:border-slate-800 pt-6 animate-fade-in">
                   <div className="flex items-center justify-between mb-4">
-                    <h4 className="text-sm font-black tracking-tight text-slate-800 dark:text-slate-200">Extracted Questions Preview ({stagedQuestions.length})</h4>
+                    <h4 className="text-sm font-black tracking-tight">Extracted Questions Preview ({stagedQuestions.length})</h4>
                     <div className="flex items-center space-x-2">
                       <button
                         onClick={copyAllStagedToClipboard}
@@ -2042,23 +2105,24 @@ export default function Dashboard() {
                   {isSaving && (
                     <div className="bg-slate-50 dark:bg-slate-850 p-4 rounded-2xl border border-indigo-100 dark:border-indigo-900/30 mb-4 animate-pulse">
                       <div className="flex justify-between items-center mb-2">
-                        <span className="text-xs font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest">Committing to Database...</span>
+                        <span className="text-xs font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest">Committing to Firebase...</span>
                         <span className="text-xs font-mono font-bold">{savingProgress}%</span>
                       </div>
                       <div className="w-full bg-slate-200 dark:bg-slate-800 rounded-full h-2.5 overflow-hidden">
                         <div className="bg-indigo-600 h-full transition-all duration-300" style={{ width: `${savingProgress}%` }} />
                       </div>
+                      <p className="text-[10px] text-slate-400 mt-2 text-center italic">Writing data structures securely to cloud indexes...</p>
                     </div>
                   )}
 
                   {importSuccess && (
-                    <div className="bg-emerald-50 dark:bg-emerald-900/20 p-4 rounded-2xl border border-emerald-200 dark:border-emerald-800/50 mb-4 flex items-center space-x-3 text-emerald-700 dark:text-emerald-400">
+                    <div className="bg-emerald-50 dark:bg-emerald-900/20 p-4 rounded-2xl border border-emerald-200 dark:border-emerald-800/50 mb-4 flex items-center space-x-3 text-emerald-700 dark:text-emerald-400 animate-bounce-slow">
                       <Check className="h-5 w-5 shrink-0" />
                       <span className="text-xs font-bold">{importSuccess}</span>
                     </div>
                   )}
 
-                  <button onClick={() => setStagedQuestions([])} className="text-[10px] font-bold text-slate-400 hover:text-rose-500 mb-2 cursor-pointer block text-right">Clear Queue</button>         
+                  <button onClick={() => setStagedQuestions([])} className="self-end text-[10px] font-bold text-slate-400 hover:text-rose-500 hidden sm:block mb-2">Clear Queue</button>         
                   
                   <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2 border border-slate-100 dark:border-slate-800 p-2 rounded-2xl bg-slate-50 dark:bg-slate-900/50">
                     {stagedQuestions.map((q, qIndex) => (
