@@ -431,7 +431,13 @@ export default function Dashboard() {
 
   const [searchQuery, setSearchQuery] = useState("");
   const [filterSubject, setFilterSubject] = useState("All");
+  const [visibleCount, setVisibleCount] = useState(24);
   const [copyingAll, setCopyingAll] = useState<boolean | null>(false);
+
+  // Automatically reset visible limit when search query or filter updates
+  useEffect(() => {
+    setVisibleCount(24);
+  }, [searchQuery, filterSubject]);
 
   const copyAllStagedToClipboard = async () => {
     if (stagedQuestions.length === 0) return;
@@ -1678,71 +1684,84 @@ export default function Dashboard() {
                     <p className="text-[11px] text-slate-400 mt-1">Clear your searching tags or upload some HTML sheets to populate.</p>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {filteredQuestions.map((q) => {
-                      const letters = ['A', 'B', 'C', 'D'];
-                      const isBookmarked = localReviewBank[q.id]?.isBookmarked || false;
-                      return (
-                        <div 
-                          key={q.id}
-                          className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 sm:p-5 rounded-2xl flex flex-col justify-between hover:border-slate-300 dark:hover:border-slate-705 shadow-sm transition-all"
-                        >
-                          <div>
-                            <div className="flex items-center justify-between mb-3.5">
-                              <span className="text-[9px] font-bold text-rose-500 bg-rose-500/10 px-2 rounded-md py-0.5 uppercase tracking-wider">{q.subject}</span>
-                              <div className="flex items-center space-x-2">
-                                <button
-                                  onClick={() => toggleBookmark(q.id)}
-                                  className={`p-1.5 rounded-md transition-all ${
-                                    isBookmarked ? 'bg-amber-100 text-amber-600 border border-amber-200' : 'text-slate-400 hover:text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-950/20'
-                                  }`}
-                                  title="Bookmark for review"
-                                >
-                                  <Bookmark className={`h-3.5 w-3.5 ${isBookmarked ? 'fill-current' : ''}`} />
-                                </button>
-                                <button
-                                  onClick={() => handleDeleteFromBank(q.id)}
-                                  className="text-slate-450 hover:text-red-500 p-1.5 rounded-md hover:bg-rose-50 dark:hover:bg-rose-950/20 transition cursor-pointer"
-                                  title="Remove question"
-                                >
-                                  <Trash2 className="h-3.5 w-3.5 hover:scale-110 active:scale-95" />
-                                </button>
+                  <div className="space-y-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {filteredQuestions.slice(0, visibleCount).map((q) => {
+                        const letters = ['A', 'B', 'C', 'D'];
+                        const isBookmarked = localReviewBank[q.id]?.isBookmarked || false;
+                        return (
+                          <div 
+                            key={q.id}
+                            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-4 sm:p-5 rounded-2xl flex flex-col justify-between hover:border-slate-300 dark:hover:border-slate-705 shadow-sm transition-all"
+                          >
+                            <div>
+                              <div className="flex items-center justify-between mb-3.5">
+                                <span className="text-[9px] font-bold text-rose-500 bg-rose-500/10 px-2 rounded-md py-0.5 uppercase tracking-wider">{q.subject}</span>
+                                <div className="flex items-center space-x-2">
+                                  <button
+                                    onClick={() => toggleBookmark(q.id)}
+                                    className={`p-1.5 rounded-md transition-all ${
+                                      isBookmarked ? 'bg-amber-100 text-amber-600 border border-amber-200' : 'text-slate-400 hover:text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-950/20'
+                                    }`}
+                                    title="Bookmark for review"
+                                  >
+                                    <Bookmark className={`h-3.5 w-3.5 ${isBookmarked ? 'fill-current' : ''}`} />
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteFromBank(q.id)}
+                                    className="text-slate-450 hover:text-red-500 p-1.5 rounded-md hover:bg-rose-50 dark:hover:bg-rose-950/20 transition cursor-pointer"
+                                    title="Remove question"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5 hover:scale-110 active:scale-95" />
+                                  </button>
+                                </div>
+                              </div>
+
+                              <div className="mb-4">
+                                <FormattedText text={q.questionText} className="text-xs font-bold text-slate-850 dark:text-slate-150 leading-relaxed" />
+                              </div>
+
+                              <div className="space-y-1.5 mb-4">
+                                {q.options.map((opt, oIdx) => (
+                                  <div 
+                                    key={oIdx} 
+                                    className={`text-[11px] p-2 rounded-lg border flex items-center space-x-1.5 ${
+                                      oIdx === q.correctAnswerIndex ? 'border-emerald-250 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400 font-semibold' : 'border-slate-100 dark:border-slate-850 bg-slate-50/50 dark:bg-slate-900/30 text-slate-500 dark:text-slate-400'
+                                    }`}
+                                  >
+                                    <span className={`h-4.5 w-4.5 text-[9px] shrink-0 rounded flex items-center justify-center font-bold ${
+                                      oIdx === q.correctAnswerIndex ? 'bg-emerald-600 text-white' : 'bg-slate-200 dark:bg-slate-700'
+                                    }`}>
+                                      {letters[oIdx]}
+                                    </span>
+                                    <div className="truncate flex-1">
+                                      <FormattedText text={opt} />
+                                    </div>
+                                  </div>
+                                ))}
                               </div>
                             </div>
 
-                            <div className="mb-4">
-                              <FormattedText text={q.questionText} className="text-xs font-bold text-slate-850 dark:text-slate-150 leading-relaxed" />
-                            </div>
-
-                            <div className="space-y-1.5 mb-4">
-                              {q.options.map((opt, oIdx) => (
-                                <div 
-                                  key={oIdx} 
-                                  className={`text-[11px] p-2 rounded-lg border flex items-center space-x-1.5 ${
-                                    oIdx === q.correctAnswerIndex ? 'border-emerald-250 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400 font-semibold' : 'border-slate-100 dark:border-slate-850 bg-slate-50/50 dark:bg-slate-900/30 text-slate-500 dark:text-slate-400'
-                                  }`}
-                                >
-                                  <span className={`h-4.5 w-4.5 text-[9px] shrink-0 rounded flex items-center justify-center font-bold ${
-                                    oIdx === q.correctAnswerIndex ? 'bg-emerald-600 text-white' : 'bg-slate-200 dark:bg-slate-700'
-                                  }`}>
-                                    {letters[oIdx]}
-                                  </span>
-                                  <div className="truncate flex-1">
-                                    <FormattedText text={opt} />
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
+                            {q.explanation && (
+                              <div className="p-3 bg-slate-100/50 dark:bg-slate-800/40 rounded-xl text-[10px] text-slate-500 dark:text-slate-400 mt-2 border border-slate-150/40 dark:border-slate-850/40 leading-relaxed">
+                                <strong>Step Explanation:</strong> <FormattedText text={q.explanation} className="inline" />
+                              </div>
+                            )}
                           </div>
+                        );
+                      })}
+                    </div>
 
-                          {q.explanation && (
-                            <div className="p-3 bg-slate-100/50 dark:bg-slate-800/40 rounded-xl text-[10px] text-slate-500 dark:text-slate-400 mt-2 border border-slate-150/40 dark:border-slate-850/40 leading-relaxed">
-                              <strong>Step Explanation:</strong> <FormattedText text={q.explanation} className="inline" />
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
+                    {filteredQuestions.length > visibleCount && (
+                      <div className="flex justify-center pt-2">
+                        <button
+                          onClick={() => setVisibleCount((prev) => prev + 24)}
+                          className="px-6 py-2.5 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white dark:from-indigo-500 dark:to-indigo-600 rounded-xl text-xs font-black uppercase tracking-widest hover:scale-[1.02] shadow-md hover:shadow-indigo-500/10 active:scale-95 transition-all cursor-pointer"
+                        >
+                          Load More Questions ({filteredQuestions.length - visibleCount} remaining)
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
