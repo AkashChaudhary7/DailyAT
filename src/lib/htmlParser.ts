@@ -13,6 +13,12 @@ import { FONT_REGISTRY } from "./fontDatabase";
 export function normalizeHindiText(text: string): string {
   if (!text) return "";
   let out = text;
+  
+  out = out.replace(/धार\.(ा|ा_)/g, "धारण"); // उपाधिधार.ा -> उपाधि धारण (Direct fix for current issue)
+  out = out.replace(/धार\./g, "धारण");
+  out = out.replace(/क्र\./g, "क्रमण");       // आक्र. -> आक्रमण
+  out = out.replace(/ष\./g, "ष्णु");         // सहिष्.ुता -> सहिष्णुता
+  out = out.replace(/ण्डो\./g, "ण्डोर");
 
   // =========================================================================
   // AUTO-LANGUAGE DETECTOR: Scan document layout footprint clusters
@@ -58,7 +64,8 @@ export function normalizeHindiText(text: string): string {
   // Step 3: CONTEXTUAL REGEX: Universal Financial Numerical Comma Safe-Guard Fixer
   // Safe-guard: Checks bounds to convert 'ए' into comma ',' ONLY between numerical digits (e.g., 30ए400 -> 30,400)
   out = out.replace(/(\d+)ए(\d+)/g, "$1,$2");
-
+// Custom regex pattern to target single hanging arrow tokens gracefully
+  out = out.replace(/→/g, "झ");
   // Step 4: CONTEXTUAL REGEX: Universal Mathematical Ratio/Colon Safe-Guard Fixer
   // Safe-guard: Checks bounds to convert 'रू' into colon ':' ONLY between numerical digits (e.g., 2रू3 -> 2:3)
   out = out.replace(/(\d+)रू(\d+)/g, "$1:$2");
