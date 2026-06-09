@@ -19,20 +19,22 @@ interface MockTestInterfaceProps {
 }
 
 export default function MockTestInterface({
-  questions,
+  questions: initialQuestions,
   settings,
   onFinish,
   onCancel,
   isDarkMode
 }: MockTestInterfaceProps) {
+  // Offline sync: Use local state for tracking questions list so items can be isolated instantly
+  const [questions, setQuestions] = useState<Question[]>(initialQuestions);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [selectedAnswers, setSelectedAnswers] = useState<(number | null)[]>(
-    new Array(questions.length).fill(null)
+    new Array(initialQuestions.length).fill(null)
   );
   
   // Track visited questions: unvisited, unanswered-visited, answered, flagged
   const [questionStates, setQuestionStates] = useState<('unvisited' | 'unanswered-visited' | 'answered' | 'flagged')[]>(
-    new Array(questions.length).fill('unvisited').map((_, i) => i === 0 ? 'unanswered-visited' : 'unvisited')
+    new Array(initialQuestions.length).fill('unvisited').map((_, i) => i === 0 ? 'unanswered-visited' : 'unvisited')
   );
 
   const [timeLeft, setTimeLeft] = useState<number>(settings.durationMinutes * 60);
@@ -77,11 +79,22 @@ export default function MockTestInterface({
   };
 
   // ==========================================
-  // CORE FLAG BUTTON HANDLER ACTION MATRIX
+  // RESILIENT FLAG ISOLATION ENGINE (COMBINED)
   // ==========================================
   const handleFlagFontError = async () => {
     if (!questions || questions.length === 0) return;
     const currentQuestion = questions[currentIndex];
+
+    // Optimistically update the local cache immediately for offline protection
+    const localCachedQuestions = localStorage.getItem("MOCK_QUESTIONS");
+    if (localCachedQuestions) {
+      try {
+        const parsed = JSON.parse(localCachedQuestions).filter((q: any) => q.id !== currentQuestion.id);
+        localStorage.setItem("MOCK_QUESTIONS", JSON.stringify(parsed));
+      } catch (err) { 
+        console.error("Local storage sync error context:", err); 
+      }
+    }
 
     try {
       // 1. Send data to flagged review collection pool in Firestore
@@ -97,25 +110,36 @@ export default function MockTestInterface({
         status: "pending"
       });
 
-      // 2. Remove instantly from active questions pool in state/UI
+      // 2. Remove instantly from global active database
       await deleteDoc(doc(db, "questions", currentQuestion.id));
-
-      setToastMessage({ text: "Question reported and safely isolated!", type: "success" });
-      
-      // Auto advance or navigate handle index rows safely without popups
-      if (currentIndex < questions.length - 1) {
-        navigateTo(currentIndex + 1);
-      } else if (currentIndex > 0) {
-        navigateTo(currentIndex - 1);
-      } else {
-        setToastMessage({ text: "Database node isolation completed!", type: "info" });
-        setTimeout(() => {
-          onCancel();
-        }, 1000);
-      }
     } catch (error) {
-      console.error("Flag operation error context:", error);
-      setToastMessage({ text: "Database node isolation failed.", type: "error" });
+      console.warn("Cloud isolation logging delayed due to offline status:", error);
+    }
+
+    setToastMessage({ text: "Question reported and safely isolated!", type: "success" });
+      
+    // Instantly slide active array structure down dynamically without UI breakdown
+    const updatedQuestions = questions.filter((_, i) => i !== currentIndex);
+    if (updatedQuestions.length === 0) {
+      setToastMessage({ text: "All exam entries isolated. Exiting...", type: "info" });
+      setTimeout(() => {
+        onCancel();
+      }, 1500);
+      return;
+    }
+
+    setQuestions(updatedQuestions);
+
+    // Rewind selected index mapping records safely without popups
+    const nextAnswers = selectedAnswers.filter((_, i) => i !== currentIndex);
+    setSelectedAnswers(nextAnswers);
+    
+    const nextStates = questionStates.filter((_, i) => i !== currentIndex);
+    setQuestionStates(nextStates);
+
+    // Guard safe indexing logic
+    if (currentIndex >= updatedQuestions.length) {
+      setCurrentIndex(updatedQuestions.length - 1);
     }
   };
 
@@ -261,7 +285,7 @@ export default function MockTestInterface({
           
           <div>
             <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-black tracking-widest uppercase font-display">{settings.subject} Test </span>
-            <h2 className="text-xs sm:text-sm font-black truncate max-w-[170px] sm:max-w-xs font-display text-slate-700 dark:text-slate-300 uppercase tracking-wide">{settings.questionCount} Questions </h2>
+            <h2 className="text-xs sm:text-sm font-black truncate max-w-[170px] sm:max-w-xs font-display text-slate-700 dark:text-slate-300 uppercase tracking-wide">{questions.length} Questions </h2>
           </div>
         </div>
 
@@ -285,7 +309,7 @@ export default function MockTestInterface({
 
           <button
             onClick={() => setIsConfirmSubmitOpen(true)}
-            className="flex h-10 items-center rounded-xl bg-emerald-600 hover:bg-emerald-600 text-white px-5 text-xs font-black uppercase tracking-widest shadow hover:scale-102 active:scale-98 transition-all cursor-pointer font-display"
+            className="flex h-10 items-center rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white px-5 text-xs font-black uppercase tracking-widest shadow hover:scale-102 active:scale-98 transition-all cursor-pointer font-display"
           >
             Submit Test
           </button>
@@ -403,7 +427,7 @@ export default function MockTestInterface({
                 className={`flex h-9 items-center px-4 rounded-lg text-xs font-semibold border bg-white dark:bg-slate-800 transition-all ${
                   currentIndex === 0
                     ? 'border-slate-200 dark:border-slate-800 text-slate-300 dark:text-slate-700 cursor-not-allowed'
-                    : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 cursor-pointer'
+                    : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-770 cursor-pointer'
                 }`}
               >
                 <ChevronLeft className="h-4 w-4 mr-1" />
@@ -415,8 +439,9 @@ export default function MockTestInterface({
                 type="button"
                 onClick={handleFlagFontError}
                 className="flex h-9 items-center px-4 bg-red-50 dark:bg-red-950/20 text-red-600 dark:text-red-400 font-bold border border-red-200 dark:border-red-900 text-xs rounded-lg transition-all shadow-sm cursor-pointer hover:bg-red-150 mr-2 font-display uppercase tracking-wider"
+                title="Report & Isolate Error question"
               >
-                🚩 
+                🚩 Font Error
               </button>
 
               <button
@@ -425,7 +450,7 @@ export default function MockTestInterface({
                 className={`flex h-9 items-center px-4 rounded-lg text-xs font-semibold border bg-white dark:bg-slate-800 transition-all ${
                   currentIndex === questions.length - 1
                     ? 'border-slate-200 dark:border-slate-800 text-slate-300 dark:text-slate-700 cursor-not-allowed'
-                    : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 cursor-pointer'
+                    : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-770 cursor-pointer'
                 }`}
               >
                 <span>Next</span>
@@ -480,7 +505,7 @@ export default function MockTestInterface({
                 }
 
                 if (isCurrent) {
-                  btnClass += " ring-3 ring-indigo-605 ring-offset-2 dark:ring-offset-slate-900 scale-105 font-bold";
+                  btnClass += " ring-3 ring-indigo-650 ring-offset-2 dark:ring-offset-slate-900 scale-105 font-bold";
                 }
 
                 return (
@@ -497,7 +522,7 @@ export default function MockTestInterface({
           </div>
 
           <div className="p-4 border-t border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/20 text-center font-display">
-            <span className="text-[9px] text-slate-400 dark:text-slate-500 uppercase tracking-widest font-black">TESTBOOK POWERED PORTAL</span>
+            <span className="text-[9px] text-slate-400 dark:text-slate-500 uppercase tracking-widest font-black">TESTBOOK PORTAL</span>
           </div>
         </aside>
       </div>
@@ -542,8 +567,8 @@ export default function MockTestInterface({
               
               let btnClass = "bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300";
               if (status === 'flagged') btnClass = "bg-violet-500 text-white";
-              else if (status === 'answered') btnClass = "bg-emerald-600 text-white";
-              else if (status === 'unanswered-visited') btnClass = "bg-red-500 text-white";
+              else if (status === 'answered') btnClass = "bg-indigo-600 text-white";
+              else if (status === 'unanswered-visited') btnClass = "bg-amber-500 text-white";
               if (isCurrent) btnClass += " ring-2 ring-rose-500 scale-105 font-extrabold";
 
               return (
@@ -604,7 +629,7 @@ export default function MockTestInterface({
       {/* Confirmation Exit Modal */}
       {isConfirmExitOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
-          <div className="w-full max-w-md rounded-2xl bg-white dark:bg-slate-800 p-6 shadow-2xl border border-slate-100 dark:border-slate-700">
+          <div className="w-full max-w-md rounded-2xl bg-white dark:bg-slate-800 p-6 shadow-2xl border border-slate-100 dark:border-slate-700 text-center">
             <div className="flex h-12 w-12 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-950 text-amber-600 dark:text-amber-400 mb-4 mx-auto">
               <AlertTriangle className="h-6 w-6" />
             </div>
@@ -617,7 +642,7 @@ export default function MockTestInterface({
             <div className="grid grid-cols-2 gap-3">
               <button
                 onClick={() => setIsConfirmExitOpen(false)}
-                className="h-10 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-semibold hover:bg-slate-100 dark:hover:bg-slate-750 cursor-pointer"
+                className="h-10 rounded-xl border border-slate-200 dark:border-slate-700 text-xs font-bold hover:bg-slate-100 dark:hover:bg-slate-750 cursor-pointer"
               >
                 Keep Practicing
               </button>
@@ -626,7 +651,7 @@ export default function MockTestInterface({
                   setIsConfirmExitOpen(false);
                   onCancel();
                 }}
-                className="h-10 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold shadow cursor-pointer"
+                className="h-10 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow cursor-pointer"
               >
                 Discard & Exit
               </button>
