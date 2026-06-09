@@ -30,7 +30,7 @@ export default function MockTestInterface({
     new Array(questions.length).fill(null)
   );
   
-  // Track visited questions: 0 = not visited, 1 = visited but not answered, 2 = answered
+  // Track visited questions: unvisited, unanswered-visited, answered, flagged
   const [questionStates, setQuestionStates] = useState<('unvisited' | 'unanswered-visited' | 'answered' | 'flagged')[]>(
     new Array(questions.length).fill('unvisited').map((_, i) => i === 0 ? 'unanswered-visited' : 'unvisited')
   );
@@ -39,11 +39,21 @@ export default function MockTestInterface({
   const [isConfirmSubmitOpen, setIsConfirmSubmitOpen] = useState(false);
   const [isConfirmExitOpen, setIsConfirmExitOpen] = useState(false);
   const [autoAdvance, setAutoAdvance] = useState(true);
+  
+  // Custom toast notification state to remove window.alert completely
+  const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
 
-  // Sound effects or slight visual triggers for transition
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Setup timer
+  // Auto-clear toast logs
+  useEffect(() => {
+    if (toastMessage) {
+      const t = setTimeout(() => setToastMessage(null), 3000);
+      return () => clearTimeout(t);
+    }
+  }, [toastMessage]);
+
+  // Setup timer node
   useEffect(() => {
     if (settings.hasTimer) {
       timerRef.current = setInterval(() => {
@@ -72,9 +82,6 @@ export default function MockTestInterface({
   const handleFlagFontError = async () => {
     if (!questions || questions.length === 0) return;
     const currentQuestion = questions[currentIndex];
-    
-    const confirmation = window.confirm("Bhai, kya aap is question ko Font Error/Garbage reporting ke liye flag karke live test se hatana chahte hain?");
-    if (!confirmation) return;
 
     try {
       // 1. Send data to flagged review collection pool in Firestore
@@ -93,20 +100,22 @@ export default function MockTestInterface({
       // 2. Remove instantly from active questions pool in state/UI
       await deleteDoc(doc(db, "questions", currentQuestion.id));
 
-      alert("Question reported and safely isolated!");
+      setToastMessage({ text: "Question reported and safely isolated!", type: "success" });
       
-      // Auto advance or navigate handle index rows
+      // Auto advance or navigate handle index rows safely without popups
       if (currentIndex < questions.length - 1) {
         navigateTo(currentIndex + 1);
       } else if (currentIndex > 0) {
         navigateTo(currentIndex - 1);
       } else {
-        alert("Bhai, array database set completed!");
-        onCancel();
+        setToastMessage({ text: "Database node isolation completed!", type: "info" });
+        setTimeout(() => {
+          onCancel();
+        }, 1000);
       }
     } catch (error) {
       console.error("Flag operation error context:", error);
-      alert("Database node isolation failed.");
+      setToastMessage({ text: "Database node isolation failed.", type: "error" });
     }
   };
 
@@ -123,12 +132,10 @@ export default function MockTestInterface({
     
     setQuestionStates(prev => {
       const next = [...prev];
-      // If of current, if answered let it be answered, else check if it was flagged, otherwise marked visited
       if (next[currentIndex] !== 'answered' && next[currentIndex] !== 'flagged') {
         next[currentIndex] = 'unanswered-visited';
       }
       
-      // Target index is now visited
       if (next[index] === 'unvisited') {
         next[index] = 'unanswered-visited';
       }
@@ -143,7 +150,6 @@ export default function MockTestInterface({
     nextAnswers[currentIndex] = optIndex;
     setSelectedAnswers(nextAnswers);
 
-    // Update state to answered
     setQuestionStates(prev => {
       const next = [...prev];
       if (next[currentIndex] !== 'flagged') {
@@ -152,11 +158,10 @@ export default function MockTestInterface({
       return next;
     });
 
-    // Auto-advance logic (user requested "question select krte hi aage badhe vo")
     if (autoAdvance && currentIndex < questions.length - 1) {
       setTimeout(() => {
         navigateTo(currentIndex + 1);
-      }, 350); // Small professional delay for visual transition feedback
+      }, 350);
     }
   };
 
@@ -176,7 +181,6 @@ export default function MockTestInterface({
     setQuestionStates(prev => {
       const next = [...prev];
       if (next[currentIndex] === 'flagged') {
-        // Unflag: restore to answered or unans
         next[currentIndex] = selectedAnswers[currentIndex] !== null ? 'answered' : 'unanswered-visited';
       } else {
         next[currentIndex] = 'flagged';
@@ -186,7 +190,6 @@ export default function MockTestInterface({
   };
 
   const submitQuiz = () => {
-    // Collect answers
     const answers: AttemptAnswer[] = questions.map((q, idx) => {
       const selIndex = selectedAnswers[idx];
       const isCorrect = selIndex !== null && selIndex === q.correctAnswerIndex;
@@ -203,7 +206,7 @@ export default function MockTestInterface({
     
     const timeTaken = settings.hasTimer 
       ? (settings.durationMinutes * 60 - timeLeft) 
-      : 30; // standard arbitrary speed tracker for free timer
+      : 30;
 
     const attempt: TestAttempt = {
       id: `attempt-${Date.now()}`,
@@ -223,25 +226,32 @@ export default function MockTestInterface({
     onFinish(attempt);
   };
 
-  // State Counts for Sidebar Palette
   const answeredCount = questionStates.filter(s => s === 'answered').length;
   const unvisitedCount = questionStates.filter(s => s === 'unvisited').length;
   const unansweredVisitedCount = questionStates.filter(s => s === 'unanswered-visited').length;
   const flaggedCount = questionStates.filter(s => s === 'flagged').length;
 
   const currentQuestion = questions[currentIndex];
-  // Calculate current completion percentage
   const attemptedNum = selectedAnswers.filter(ans => ans !== null).length;
   const percentComplete = Math.round((attemptedNum / questions.length) * 100);
 
   return (
     <div id="testbook-mock-fullscreen" className="fixed inset-0 z-50 flex flex-col bg-slate-50 dark:bg-slate-950 text-slate-850 dark:text-slate-100 font-sans transition-colors duration-150">
+      
+      {/* Dynamic Native Elegant Toast Node */}
+      {toastMessage && (
+        <div className="fixed top-5 left-1/2 -translate-x-1/2 z-55 animate-bounce shadow-2xl rounded-xl px-5 py-3 border font-display text-xs font-black tracking-wide uppercase flex items-center space-x-2 bg-white dark:bg-slate-900 border-indigo-500 text-indigo-650 dark:text-indigo-400">
+          <span className="h-2 w-2 rounded-full bg-indigo-500 animate-ping"></span>
+          <span>{toastMessage.text}</span>
+        </div>
+      )}
+
       {/* Header Bar */}
       <header className="flex h-16 items-center justify-between border-b border-indigo-100/40 dark:border-slate-800 bg-white dark:bg-slate-900 px-4 shadow-sm md:px-6">
         <div className="flex items-center space-x-3">
           <button
             onClick={() => setIsConfirmExitOpen(true)}
-            className="flex h-10 items-center space-x-2 rounded-xl border border-slate-200 dark:border-slate-800 px-4 text-xs font-bold bg-slate-50 dark:bg-slate-800/50 hover:bg-slate-100 dark:hover:bg-slate-700 cursor-pointer transition-all uppercase tracking-wider"
+            className="flex h-10 items-center space-x-2 rounded-xl border border-slate-200 dark:border-slate-800 px-4 text-xs font-bold bg-slate-50 dark:bg-slate-800/50 hover:bg-slate-100 dark:hover:bg-slate-770 cursor-pointer transition-all uppercase tracking-wider"
           >
             <ArrowLeft className="h-4 w-4 text-slate-500" />
             <span className="hidden sm:inline">Exit to Dashboard</span>
@@ -255,9 +265,7 @@ export default function MockTestInterface({
           </div>
         </div>
 
-        {/* Real-time details */}
         <div className="flex items-center space-x-3">
-          {/* Progress bar info */}
           <div className="hidden md:flex flex-col items-end mr-2">
             <span className="text-[10px] text-slate-400 dark:text-slate-500 font-mono font-bold uppercase tracking-wider">Completed {attemptedNum}/{questions.length} ({percentComplete}%)</span>
             <div className="w-28 h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden mt-1">
@@ -286,9 +294,7 @@ export default function MockTestInterface({
 
       {/* Main Panel */}
       <div className="flex flex-1 overflow-hidden">
-        {/* Question Area (Left) */}
         <main className="flex-1 flex flex-col min-w-0 bg-white dark:bg-slate-900 overflow-y-auto">
-          {/* Progress visual indicator (mobile) */}
           <div className="h-1 bg-slate-100 dark:bg-slate-800 w-full relative sm:hidden">
             <div 
               className="absolute left-0 top-0 h-full bg-indigo-600 transition-all duration-300"
@@ -298,7 +304,6 @@ export default function MockTestInterface({
 
           {/* Question Box */}
           <div className="p-4 sm:p-8 flex-1 max-w-3xl mx-auto w-full">
-            {/* Header / Meta */}
             <div className="flex items-center justify-between mb-6 pb-4 border-b border-slate-100 dark:border-slate-800/65">
               <span className="flex items-center space-x-2 text-xs font-black text-indigo-700 dark:text-indigo-450 bg-indigo-50 dark:bg-indigo-950/40 px-3 py-1.5 rounded-xl font-display">
                 <BookOpen className="h-3.5 w-3.5" />
@@ -405,12 +410,13 @@ export default function MockTestInterface({
                 <span>Prev</span>
               </button>
 
+              {/* Fast Isolated Button Handler Node */}
               <button
                 type="button"
                 onClick={handleFlagFontError}
-                className="flex h-9 items-center px-4 bg-red-50 dark:bg-red-950/20 text-red-600 dark:text-red-400 font-bold border border-red-200 dark:border-red-900 text-xs rounded-lg transition-all shadow-sm cursor-pointer hover:bg-red-150 mr-2"
+                className="flex h-9 items-center px-4 bg-red-50 dark:bg-red-950/20 text-red-600 dark:text-red-400 font-bold border border-red-200 dark:border-red-900 text-xs rounded-lg transition-all shadow-sm cursor-pointer hover:bg-red-150 mr-2 font-display uppercase tracking-wider"
               >
-                🚩 Report Font Error
+                🚩 
               </button>
 
               <button
@@ -429,9 +435,8 @@ export default function MockTestInterface({
           </footer>
         </main>
 
-        {/* Sidebar Status (Right side, hidden on small screens unless toggled) */}
+        {/* Sidebar Status (Right side) */}
         <aside className="w-68 border-l border-indigo-100/40 dark:border-slate-800 bg-white dark:bg-slate-900 shrink-0 hidden lg:flex flex-col overflow-y-auto">
-          {/* Status Indicators breakdown */}
           <div className="p-5 border-b border-slate-100 dark:border-slate-800/65">
             <h4 className="text-[10px] font-black text-slate-400 dark:text-slate-500 mb-3.5 tracking-widest uppercase font-display">QUESTION PALETTE</h4>
             
@@ -445,7 +450,7 @@ export default function MockTestInterface({
                 <span className="text-slate-600 dark:text-slate-350 truncate">Skipped ({unansweredVisitedCount})</span>
               </div>
               <div className="flex items-center space-x-2 p-2 rounded-xl bg-slate-50 dark:bg-slate-950/40">
-                <span className="w-3.5 h-3.5 rounded-lg bg-violet-500 animate-pulse shrink-0"></span>
+                <span className="w-3.5 h-3.5 rounded-lg bg-violet-500 shrink-0"></span>
                 <span className="text-slate-600 dark:text-slate-350 truncate">Review ({flaggedCount})</span>
               </div>
               <div className="flex items-center space-x-2 p-2 rounded-xl bg-slate-50 dark:bg-slate-950/40">
@@ -475,7 +480,6 @@ export default function MockTestInterface({
                 }
 
                 if (isCurrent) {
-                  // highlight current item
                   btnClass += " ring-3 ring-indigo-605 ring-offset-2 dark:ring-offset-slate-900 scale-105 font-bold";
                 }
 
@@ -498,14 +502,13 @@ export default function MockTestInterface({
         </aside>
       </div>
 
-      {/* Small Screen Bottom Panel Toggle for palette */}
+      {/* Small Screen Bottom Panel Toggle */}
       <footer className="lg:hidden border-t border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 p-2 text-center flex items-center justify-around">
         <span className="text-xs text-slate-500 dark:text-slate-400">Total: <strong>{questions.length}</strong></span>
         <span className="text-xs text-emerald-600">Answered: <strong>{answeredCount}</strong></span>
         <span className="text-xs text-red-500">Skipped: <strong>{unansweredVisitedCount}</strong></span>
         <span className="text-xs text-violet-500">Flagged: <strong>{flaggedCount}</strong></span>
         
-        {/* Toggle drawer/palette representation */}
         <button 
           onClick={() => {
             const gridEl = document.getElementById("mobile-grid-sheet");
@@ -519,7 +522,7 @@ export default function MockTestInterface({
         </button>
       </footer>
 
-      {/* Mobile Sliding Grid Sheet (overlay, hidden by default) */}
+      {/* Mobile Sliding Grid Sheet */}
       <div id="mobile-grid-sheet" className="hidden fixed inset-0 z-50 bg-black/50 lg:hidden flex items-end justify-center">
         <div className="bg-white dark:bg-slate-800 w-full max-w-sm rounded-t-2xl p-5 flex flex-col max-h-[70vh]">
           <div className="flex items-center justify-between mb-4">
