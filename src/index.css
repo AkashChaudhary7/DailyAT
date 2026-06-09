@@ -6,3 +6,28 @@
   --font-display: "Space Grotesk", sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 }
+
+/* Color coordination and visibility security for forms in both Light and Dark modes */
+input, textarea, select {
+  color-scheme: light dark;
+}
+
+/* Core visibility fallback to prevent missing or invisible user text */
+input, textarea, select, option {
+  color: #0f172a !important; /* slate-900 */
+}
+
+/* Under dark class environments (both element-level and root html-level), force high contrast slate-100 values */
+.dark input, .dark textarea, .dark select, .dark option,
+html.dark input, html.dark textarea, html.dark select, html.dark option,
+:is(html.dark *) input, :is(html.dark *) textarea, :is(html.dark *) select, :is(html.dark *) option {
+  color: #f1f5f9 !important; /* slate-100 */
+}
+
+/* Placeholder contrast preservation */
+input::placeholder, textarea::placeholder {
+  color: #64748b !important;
+}
+.dark input::placeholder, .dark textarea::placeholder {
+  color: #94a3b8 !important;
+}
