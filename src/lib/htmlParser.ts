@@ -7,11 +7,17 @@ import { Question } from "../types";
 import { overrideLegacyFontsInHtml } from "./langUtils";
 import { FONT_REGISTRY } from "./fontDatabase";
 
+// Speed optimization cache to prevent heavy re-evaluation on large question banks
+const normalizationCache = new Map<string, string>();
+
 /**
  * Intelligent Central Text Normalization Engine using Auto-Language Detection Matrix
  */
 export function normalizeHindiText(text: string): string {
   if (!text) return "";
+  if (normalizationCache.has(text)) {
+    return normalizationCache.get(text)!;
+  }
   let out = text;
   
   // Exhaustive predefined list of replacements to tackle common Devanagari font import corruptions
@@ -353,7 +359,9 @@ export function normalizeHindiText(text: string): string {
   out = out.replace(/,\s*,/g, ", ");
   out = out.replace(/,\s*$/g, "");
   
-  return out.trim();
+  const result = out.trim();
+  normalizationCache.set(text, result);
+  return result;
 }
 
 function isLikelyEnglish(text: string): boolean {
