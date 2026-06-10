@@ -1,48 +1,37 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
 import React from 'react';
+import { normalizeHindiText } from '../lib/htmlParser';
 
 interface FormattedTextProps {
   text: string;
   className?: string;
 }
 
-/**
- * Renders text while converting [IMAGE: url] markers into actual <img> tags.
- * Preserves newlines using whitespace-pre-wrap.
- */
-export default function FormattedText({ text, className }: FormattedTextProps) {
+export default function FormattedText({ text, className = '' }: FormattedTextProps) {
   if (!text) return null;
 
-  // Split text by the image marker pattern: [IMAGE: url]
-  const parts = text.split(/(\[IMAGE: [^\]]+\])/g);
+  // Lazily normalize the Hindi text to instantly resolve font distortions before split
+  const cleanText = normalizeHindiText(text);
+
+  // Split lines to preserve carriage returns and format parts
+  const lines = cleanText.split('\n');
 
   return (
-    <div className={`whitespace-pre-wrap ${className || ''}`}>
-      {parts.map((part, index) => {
-        const imageMatch = part.match(/\[IMAGE: (.*?)\]/);
-        
-        if (imageMatch) {
-          const imageUrl = imageMatch[1].trim();
-          return (
-            <div key={index} className="my-4 overflow-hidden rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 inline-block max-w-full">
-              <img 
-                src={imageUrl} 
-                alt="Diagram or Equation" 
-                className="max-w-full h-auto object-contain"
-                onError={(e) => {
-                  const target = e.target as HTMLImageElement;
-                  target.style.display = 'none'; // Hide if fails to load
-                }}
-              />
-            </div>
-          );
-        }
-        
-        return <span key={index}>{part}</span>;
+    <div className={className}>
+      {lines.map((line, lineIdx) => {
+        // Handle bold pattern: **text**
+        const parts = line.split(/(\*\*.*?\*\*)/g);
+        const lineContent = parts.map((part, partIdx) => {
+          if (part.startsWith('**') && part.endsWith('**')) {
+            return <strong key={partIdx}>{part.slice(2, -2)}</strong>;
+          }
+          return part;
+        });
+
+        return (
+          <div key={lineIdx} className={lineIdx > 0 ? "mt-1 min-h-[1em]" : "min-h-[1em]"}>
+            {lineContent}
+          </div>
+        );
       })}
     </div>
   );
