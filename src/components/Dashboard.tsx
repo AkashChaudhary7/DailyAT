@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   addDoc,
   collection,
@@ -12,11 +12,19 @@ import {
   doc,
   writeBatch,
   setDoc,
-  deleteDoc
+  deleteDoc,
+  getDocs,
+  where
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { parseUniversalHTML, normalizeHindiText } from '../lib/htmlParser';
 import { SAMPLE_QUESTIONS } from '../utils/sampleData';
+import {
+  getCachedQuestions,
+  saveQuestionsToIndexedDB,
+  deleteQuestionFromIndexedDB,
+  clearQuestionsIndexedDB
+} from '../lib/indexedDb';
 import { 
   ResponsiveContainer, 
   LineChart, 
@@ -56,9 +64,49 @@ import {
   ChevronDown,
   ChevronRight
 } from 'lucide-react';
-import { Question, TestAttempt, QuizSettings, ExamCounter, DailyGoal } from '../types';
+import { Question, TestAttempt, QuizSettings, ExamCounter, DailyGoal, ExamConfig } from '../types';
 import MockTestInterface from './MockTestInterface';
 import FormattedText from './FormattedText';
+
+const LOCAL_STORAGE_MAX_BYTES = 4 * 1024 * 1024; // 4MB Limit
+
+export const getLocalStorageSize = (): number => {
+  let total = 0;
+  try {
+    for (const x in localStorage) {
+      if (localStorage.hasOwnProperty(x)) {
+        const val = localStorage.getItem(x);
+        if (val) {
+          total += (val.length + x.length) * 2; // UTF-16 approximation
+        }
+      }
+    }
+  } catch (e) {}
+  return total;
+};
+
+// Safe localStorage wrapper with active 4MB predicted capacity safeguard
+const safeLocalStorageSetItem = (key: string, value: string): boolean => {
+  try {
+    const currentSize = getLocalStorageSize();
+    const oldValLength = ((localStorage.getItem(key) || '').length + key.length) * 2;
+    const newValLength = (value.length + key.length) * 2;
+    const predictedSize = currentSize - oldValLength + newValLength;
+
+    if (predictedSize > LOCAL_STORAGE_MAX_BYTES) {
+      console.warn(`[LocalStorage Safe-Guard] Blocked saving "${key}" because predicted total storage would be ${(predictedSize / (1024 * 1024)).toFixed(2)} MB, exceeding the 4MB limit.`);
+      return false;
+    }
+
+    localStorage.setItem(key, value);
+    // Dispatch instant custom storage budget change event for React components to pick up
+    window.dispatchEvent(new CustomEvent('localstorage_budget_change'));
+    return true;
+  } catch (error) {
+    console.error(`[LocalStorage Safe-Guard] Failed to save "${key}" due to quota bounds:`, error);
+    return false;
+  }
+};
 
 // Local UI Interface for keeping bookmarks/reviews separate per device
 interface LocalReviewState {
@@ -166,8 +214,8 @@ export function FlaggedQuestionsManager() {
     <div className="bg-white rounded-3xl p-6 border border-gray-100 shadow-sm mt-2">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-gray-100 pb-5 mb-5 gap-4">
         <div>
-          <h2 className="text-xl font-bold text-gray-800">Flagged Question </h2>
-          <p className="text-gray-400 text-sm mt-0.5">Pending evaluation : {flaggedData.length}</p>
+          <h2 className="text-xl font-bold text-gray-800">Flagged Garbage Font Queue</h2>
+          <p className="text-gray-400 text-sm mt-0.5">Pending evaluation entries count: {flaggedData.length}</p>
         </div>
         
         <div className="flex flex-wrap gap-3">
@@ -175,11 +223,11 @@ export function FlaggedQuestionsManager() {
             onClick={downloadBulkFlaggedJson}
             className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-xl shadow-sm transition duration-150"
           >
-            📥 Download Data
+            📥 Download Flagged Data (JSON)
           </button>
           
           <label className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold rounded-xl shadow-sm cursor-pointer transition duration-150">
-            📤 Upload Data 
+            📤 Upload Corrected JSON Sync
             <input type="file" accept=".json" onChange={handleSpreadsheetSyncUpload} className="hidden" />
           </label>
         </div>
@@ -210,7 +258,7 @@ export function FlaggedQuestionsManager() {
                 title="Restore this question to main active pool and clear flag"
               >
                 <Check className="w-3.5 h-3.5" />
-                Restore
+                Restore (Unflag)
               </button>
               <button
                 onClick={() => handleDeletePermanently(q.id)}
@@ -218,7 +266,7 @@ export function FlaggedQuestionsManager() {
                 title="Permanently delete this question from all databases"
               >
                 <Trash2 className="w-3.5 h-3.5" />
-                Delete
+                Purge Forever
               </button>
             </div>
           </div>
@@ -372,6 +420,40 @@ const DailyGoalCard: React.FC<{
   );
 };
 
+const DEFAULT_EXAM_CONFIGS: ExamConfig[] = [
+  {
+    id: 'exam-cgl',
+    name: 'SSC CGL Tier 1',
+    durationMinutes: 60,
+    subjectDistribution: {
+      'Mathematics': 25,
+      'Reasoning': 25,
+      'English': 25,
+      'General Studies': 25
+    }
+  },
+  {
+    id: 'exam-ntpc',
+    name: 'Railway NTPC',
+    durationMinutes: 90,
+    subjectDistribution: {
+      'Mathematics': 35,
+      'Reasoning': 30,
+      'Science': 20,
+      'Current Affairs': 15
+    }
+  },
+  {
+    id: 'exam-csat',
+    name: 'UPSC Prelims CSAT',
+    durationMinutes: 120,
+    subjectDistribution: {
+      'Reasoning': 40,
+      'Mathematics': 40
+    }
+  }
+];
+
 export default function Dashboard() {
   const [questions, setQuestions] = useState<Question[]>([]);
   const [attempts, setAttempts] = useState<TestAttempt[]>([]);
@@ -379,6 +461,32 @@ export default function Dashboard() {
   const [isDarkMode, setIsDarkMode] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<string>('mock-config');
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
+
+  // New offline support and local safeguards states
+  const [forceOfflineMode, setForceOfflineMode] = useState<boolean>(false);
+  const [offlineDownloadedQuestions, setOfflineDownloadedQuestions] = useState<Question[]>([]);
+  const [selectedOfflineSubjects, setSelectedOfflineSubjects] = useState<string[]>([]);
+  const [localBytesUsage, setLocalBytesUsage] = useState<number>(0);
+
+  // New Exam Configs pattern states
+  const [examConfigs, setExamConfigs] = useState<ExamConfig[]>(DEFAULT_EXAM_CONFIGS);
+  const [selectedExamId, setSelectedExamId] = useState<string>("custom");
+
+  // Admin pattern selection and classification states
+  const [selectedAdminExamId, setSelectedAdminExamId] = useState<string>("");
+  const [newExamName, setNewExamName] = useState<string>("");
+  const [newExamDuration, setNewExamDuration] = useState<number>(60);
+  const [newConfigSubject, setNewConfigSubject] = useState<string>("");
+  const [newConfigCount, setNewConfigCount] = useState<number>(10);
+
+  const [isClassifying, setIsClassifying] = useState<boolean>(false);
+  const [classificationStatus, setClassificationStatus] = useState<string>("");
+  const cancelClassificationRef = useRef<boolean>(false);
+
+  const [isQuotaExceeded, setIsQuotaExceeded] = useState<boolean>(false);
+
+  const [isScanningDuplicates, setIsScanningDuplicates] = useState<boolean>(false);
+  const [duplicateScanStatus, setDuplicateScanStatus] = useState<string>("");
 
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [stagedQuestions, setStagedQuestions] = useState<Question[]>([]);
@@ -431,13 +539,14 @@ export default function Dashboard() {
 
   const [searchQuery, setSearchQuery] = useState("");
   const [filterSubject, setFilterSubject] = useState("All");
+  const [filterClassifiedOnly, setFilterClassifiedOnly] = useState<boolean>(false);
   const [visibleCount, setVisibleCount] = useState(24);
   const [copyingAll, setCopyingAll] = useState<boolean | null>(false);
 
   // Automatically reset visible limit when search query or filter updates
   useEffect(() => {
     setVisibleCount(24);
-  }, [searchQuery, filterSubject]);
+  }, [searchQuery, filterSubject, filterClassifiedOnly]);
 
   const copyAllStagedToClipboard = async () => {
     if (stagedQuestions.length === 0) return;
@@ -506,35 +615,191 @@ export default function Dashboard() {
       } catch (e) { console.error(e); }
     }
 
-    console.log("Listening to Firestore real-time updates...");
-    const q = query(collection(db, "questions"));
-    
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const firestoreQuestions = snapshot.docs.map(doc => {
-        const qData = doc.data();
-        const rawQuestionText = qData.questionText || "";
-        const rawExplanation = qData.explanation || "";
-        const rawOptions = Array.isArray(qData.options) ? qData.options : [];
-        const rawSubject = qData.subject || "";
+    // Load live questions instantly from high-speed IndexedDB cache (virtually unlimited)
+    getCachedQuestions().then(async (cached) => {
+      if (cached && cached.length > 0) {
+        console.log(`Loaded ${cached.length} questions from IndexedDB cache.`);
+        setQuestions(cached);
         
-        return {
-          ...qData,
-          firestoreId: doc.id,
-          id: qData.id || doc.id,
-          questionText: normalizeHindiText(rawQuestionText),
-          explanation: normalizeHindiText(rawExplanation),
-          options: rawOptions.map((opt: any) => normalizeHindiText(String(opt))),
-          subject: normalizeHindiText(rawSubject)
-        };
-      }) as unknown as Question[];
-      
-      setQuestions(firestoreQuestions);
-      localStorage.setItem("MOCK_QUESTIONS", JSON.stringify(firestoreQuestions));
+        // Incremental check: check if remote system metadata timestamp is newer
+        const localLastSynced = localStorage.getItem('MOCK_LAST_SYNCED_TIME') || '2000-01-01T00:00:00.000Z';
+        try {
+          console.log(`Checking system update metadata with threshold: ${localLastSynced}`);
+          let needsSync = true;
+          try {
+            // Fetch a single document for tracking system database version - EXACTLY 1 Firestore Read!
+            const systemDoc = await getDocs(query(collection(db, "db_metadata")));
+            if (!systemDoc.empty) {
+              const sysData = systemDoc.docs[0].data();
+              const lastUpdated = sysData.lastUpdated || '';
+              if (lastUpdated && lastUpdated <= localLastSynced) {
+                needsSync = false;
+                console.log(`Cloud database has not changed since last sync (${lastUpdated}). Consumed EXACTLY 1 read!`);
+              }
+            }
+          } catch (metadataError) {
+            console.warn("Could not query metadata log, defaulting to optimistic incremental sync:", metadataError);
+          }
+          
+          if (needsSync) {
+            console.log(`Starting incremental sync since: ${localLastSynced}`);
+            const qIncrement = query(
+              collection(db, "questions"), 
+              where("updatedAt", ">", localLastSynced)
+            );
+            const snap = await getDocs(qIncrement);
+            if (!snap.empty) {
+              console.log(`Found ${snap.size} updated/new questions in cloud. Mirroring to IndexedDB cache...`);
+              const updatedList: Question[] = [];
+              let maxUpdatedAt = localLastSynced;
+              
+              snap.forEach(docSnap => {
+                const qData = docSnap.data();
+                const rawQuestionText = qData.questionText || "";
+                const rawExplanation = qData.explanation || "";
+                const rawOptions = Array.isArray(qData.options) ? qData.options : [];
+                const rawSubject = qData.subject || "";
+                const qObj: Question = {
+                  ...qData,
+                  firestoreId: docSnap.id,
+                  id: qData.id || docSnap.id,
+                  questionText: rawQuestionText,
+                  explanation: rawExplanation,
+                  options: rawOptions.map((opt: any) => String(opt)),
+                  subject: rawSubject
+                } as unknown as Question;
+                updatedList.push(qObj);
+                
+                const qUpdatedAt = qData.updatedAt || qData.createdAt || '';
+                if (qUpdatedAt > maxUpdatedAt) {
+                  maxUpdatedAt = qUpdatedAt;
+                }
+              });
+              
+              // Overwrite updated items in IndexedDB
+              await saveQuestionsToIndexedDB(updatedList);
+              
+              // Reload all from IndexedDB to ensure consistency
+              const finalQs = await getCachedQuestions();
+              setQuestions(finalQs);
+              
+              localStorage.setItem('MOCK_LAST_SYNCED_TIME', maxUpdatedAt || new Date().toISOString());
+            } else {
+              console.log("No new updates in cloud system database. Cache is up to date.");
+            }
+          }
+          setIsQuotaExceeded(false);
+        } catch (err: any) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          if (errMsg.includes("Quota") || errMsg.includes("quota") || errMsg.includes("limit") || errMsg.includes("exceeded")) {
+            setIsQuotaExceeded(true);
+            console.info("Firestore status: High-speed local cache active (Cloud server daily limit reached). Your app is 100% operational.");
+          } else {
+            console.error("Unexpected sync error:", err);
+          }
+        }
+      } else {
+        // If IndexedDB is empty, triggers automatic first-time full sync
+        console.log("IndexedDB empty! Firing standard bootstrap first-time full database checkout...");
+        try {
+          const fullSnap = await getDocs(query(collection(db, "questions")));
+          const fullList: Question[] = [];
+          let maxTime = '2000-01-01T00:00:00.000Z';
+          
+          fullSnap.forEach(docSnap => {
+            const qData = docSnap.data();
+            const rawQuestionText = qData.questionText || "";
+            const rawExplanation = qData.explanation || "";
+            const rawOptions = Array.isArray(qData.options) ? qData.options : [];
+            const rawSubject = qData.subject || "";
+            const qObj: Question = {
+              ...qData,
+              firestoreId: docSnap.id,
+              id: qData.id || docSnap.id,
+              questionText: rawQuestionText,
+              explanation: rawExplanation,
+              options: rawOptions.map((opt: any) => String(opt)),
+              subject: rawSubject
+            } as unknown as Question;
+            fullList.push(qObj);
+            
+            const itemTime = qData.updatedAt || qData.createdAt || '';
+            if (itemTime > maxTime) {
+              maxTime = itemTime;
+            }
+          });
+          
+          if (fullList.length > 0) {
+            await saveQuestionsToIndexedDB(fullList);
+            setQuestions(fullList);
+            localStorage.setItem('MOCK_LAST_SYNCED_TIME', maxTime || new Date().toISOString());
+          } else {
+            setQuestions(SAMPLE_QUESTIONS);
+            await saveQuestionsToIndexedDB(SAMPLE_QUESTIONS);
+          }
+          setIsQuotaExceeded(false);
+        } catch (err: any) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          if (errMsg.includes("Quota") || errMsg.includes("quota") || errMsg.includes("limit") || errMsg.includes("exceeded")) {
+            setIsQuotaExceeded(true);
+            console.info("Firestore status: High-speed local cache active (Cloud server daily limit reached). Using local questions.");
+          } else {
+            console.error("Full init fetch failure:", err);
+          }
+          setQuestions(SAMPLE_QUESTIONS);
+        }
+      }
+    });
+
+    // Clean up legacy localStorage cache to save standard storage limits
+    localStorage.removeItem('MOCK_LIVE_QUESTIONS_CACHE');
+
+    // Load Offline Cache downloaded questions
+    const storedOfflineDownloads = localStorage.getItem('MOCK_OFFLINE_DOWNLOADED_QUESTIONS');
+    if (storedOfflineDownloads) {
+      try {
+        setOfflineDownloadedQuestions(JSON.parse(storedOfflineDownloads));
+      } catch (e) { console.error(e); }
+    }
+
+    // Load local exam configs if stored
+    const storedExamsLocal = localStorage.getItem('MOCK_EXAM_CONFIGS');
+    if (storedExamsLocal) {
+      try {
+        setExamConfigs(JSON.parse(storedExamsLocal));
+      } catch (e) { }
+    }
+
+    // Measure total initial localStorage bytes usage
+    let currentUsage = 0;
+    try {
+      for (const k in localStorage) {
+        if (localStorage.hasOwnProperty(k)) {
+          const val = localStorage.getItem(k);
+          if (val) {
+            currentUsage += (val.length + k.length) * 2; // UTF-16 approximation
+          }
+        }
+      }
+      setLocalBytesUsage(currentUsage);
+    } catch (e) { }
+
+    // Real-time listener for Exam patterns configurations
+    const unsubscribeExams = onSnapshot(collection(db, "exam_configs"), (snapshot) => {
+      const loadedExams = snapshot.docs.map(doc => ({
+        ...doc.data(),
+        id: doc.id
+      })) as unknown as ExamConfig[];
+      setExamConfigs(loadedExams);
+      safeLocalStorageSetItem('MOCK_EXAM_CONFIGS', JSON.stringify(loadedExams));
+      setIsQuotaExceeded(false);
     }, (error) => {
-      console.error("Firestore real-time sync failure:", error);
-      const storedQuestions = localStorage.getItem("MOCK_QUESTIONS");
-      if (storedQuestions) {
-        setQuestions(JSON.parse(storedQuestions));
+      const errMsg = error instanceof Error ? error.message : String(error);
+      if (errMsg.includes("Quota") || errMsg.includes("quota") || errMsg.includes("limit") || errMsg.includes("exceeded")) {
+        setIsQuotaExceeded(true);
+        console.info("Firestore status: High-speed local cache active (Cloud server daily limit reached). Your patterns settings are loaded from cache.");
+      } else {
+        console.error("Firestore exam_configs sync status info:", error);
       }
     });
 
@@ -547,7 +812,7 @@ export default function Dashboard() {
       }
     } else {
       setAttempts([]);
-      localStorage.setItem('MOCK_ATTEMPTS', JSON.stringify([]));
+      safeLocalStorageSetItem('MOCK_ATTEMPTS', JSON.stringify([]));
     }
 
     const storedExams = localStorage.getItem('MOCK_EXAM_COUNTERS');
@@ -591,14 +856,16 @@ export default function Dashboard() {
             lastUpdateDate: today
           };
           setDailyGoal(newGoal);
-          localStorage.setItem('MOCK_DAILY_GOAL', JSON.stringify(newGoal));
+          safeLocalStorageSetItem('MOCK_DAILY_GOAL', JSON.stringify(newGoal));
         } else {
           setDailyGoal(parsedGoal);
         }
       } catch (e) { }
     }
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribeExams();
+    };
   }, []);
 
   // Online/Offline status check and offline creation sync trigger
@@ -621,11 +888,22 @@ export default function Dashboard() {
                 correctAnswerIndex: q.correctAnswerIndex,
                 explanation: q.explanation || "",
                 subject: q.subject || "General",
-                createdAt: new Date().toISOString()
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString()
               });
             });
             await batch.commit();
-            localStorage.setItem('MOCK_OFFLINE_QUESTIONS', JSON.stringify([]));
+
+            // Set system update metadata trigger
+            try {
+              await setDoc(doc(db, "db_metadata", "system"), {
+                lastUpdated: new Date().toISOString()
+              }, { merge: true });
+            } catch (metaErr) {
+              console.error("Failed to write system metadata trigger:", metaErr);
+            }
+
+            safeLocalStorageSetItem('MOCK_OFFLINE_QUESTIONS', JSON.stringify([]));
             alert(`Offline Sync successful! ${offlineQs.length} custom question(s) synced back to secure database servers!`);
           }
         } catch (e) {
@@ -653,6 +931,19 @@ export default function Dashboard() {
     };
   }, []);
 
+  // Listen to localstorage change events to refresh bytes consumption
+  useEffect(() => {
+    const handleStorageChange = () => {
+      setLocalBytesUsage(getLocalStorageSize());
+    };
+    window.addEventListener('localstorage_budget_change', handleStorageChange);
+    window.addEventListener('storage', handleStorageChange);
+    return () => {
+      window.removeEventListener('localstorage_budget_change', handleStorageChange);
+      window.removeEventListener('storage', handleStorageChange);
+    };
+  }, []);
+
   // Handles updating the dynamic tags list
   const handleAddNewSubjectTag = (e: React.FormEvent) => {
     e.preventDefault();
@@ -666,11 +957,11 @@ export default function Dashboard() {
 
     const updatedTags = [...subjectTagsList, cleanTag];
     setSubjectTagsList(updatedTags);
-    localStorage.setItem('MOCK_SUBJECT_TAGS', JSON.stringify(updatedTags));
+    safeLocalStorageSetItem('MOCK_SUBJECT_TAGS', JSON.stringify(updatedTags));
     
     // Auto shift selected target to the newly created tag and freeze it
     setStagingSubject(cleanTag);
-    localStorage.setItem('MOCK_STICKY_UPLOAD_TAG', cleanTag);
+    safeLocalStorageSetItem('MOCK_STICKY_UPLOAD_TAG', cleanTag);
     
     setNewCustomTagInput("");
     alert(`Successfully registered "${cleanTag}" tag.`);
@@ -678,18 +969,20 @@ export default function Dashboard() {
 
   const handleUpdateStagingSubject = (val: string) => {
     setStagingSubject(val);
-    localStorage.setItem('MOCK_STICKY_UPLOAD_TAG', val);
+    safeLocalStorageSetItem('MOCK_STICKY_UPLOAD_TAG', val);
   };
 
   const saveQuestionsToDB = (newQList: Question[]) => {
     setQuestions(newQList);
-    localStorage.setItem('MOCK_QUESTIONS', JSON.stringify(newQList));
+    saveQuestionsToIndexedDB(newQList).catch(err => {
+      console.error("IndexedDB background write error:", err);
+    });
   };
 
   const handleUpdateExamCounter = (updated: ExamCounter) => {
     const next = examCounters.map(c => c.id === updated.id ? updated : c);
     setExamCounters(next);
-    localStorage.setItem('MOCK_EXAM_COUNTERS', JSON.stringify(next));
+    safeLocalStorageSetItem('MOCK_EXAM_COUNTERS', JSON.stringify(next));
   };
 
   const handleUpdateDailyBaseTarget = (newBase: number) => {
@@ -700,7 +993,7 @@ export default function Dashboard() {
         progressToday: 0
     };
     setDailyGoal(next);
-    localStorage.setItem('MOCK_DAILY_GOAL', JSON.stringify(next));
+    safeLocalStorageSetItem('MOCK_DAILY_GOAL', JSON.stringify(next));
   };
 
   const updateProgress = (count: number) => {
@@ -709,7 +1002,7 @@ export default function Dashboard() {
         progressToday: dailyGoal.progressToday + count
     };
     setDailyGoal(next);
-    localStorage.setItem('MOCK_DAILY_GOAL', JSON.stringify(next));
+    safeLocalStorageSetItem('MOCK_DAILY_GOAL', JSON.stringify(next));
   };
 
   useEffect(() => {
@@ -725,13 +1018,13 @@ export default function Dashboard() {
 
   const saveAttemptsToDB = (newAttempts: TestAttempt[]) => {
     setAttempts(newAttempts);
-    localStorage.setItem('MOCK_ATTEMPTS', JSON.stringify(newAttempts));
+    safeLocalStorageSetItem('MOCK_ATTEMPTS', JSON.stringify(newAttempts));
   };
 
   const toggleDarkMode = () => {
     const nextMode = !isDarkMode;
     setIsDarkMode(nextMode);
-    localStorage.setItem('THEME_MODE', nextMode ? 'dark' : 'light');
+    safeLocalStorageSetItem('THEME_MODE', nextMode ? 'dark' : 'light');
   };
 
   const handleResetDatabase = () => {
@@ -739,9 +1032,8 @@ export default function Dashboard() {
       setQuestions(SAMPLE_QUESTIONS);
       setAttempts([]);
       setLocalReviewBank({});
-      localStorage.setItem('MOCK_QUESTIONS', JSON.stringify(SAMPLE_QUESTIONS));
-      localStorage.setItem('MOCK_ATTEMPTS', JSON.stringify([]));
-      localStorage.setItem('MOCK_REVIEW_STATES', JSON.stringify({}));
+      safeLocalStorageSetItem('MOCK_ATTEMPTS', JSON.stringify([]));
+      safeLocalStorageSetItem('MOCK_REVIEW_STATES', JSON.stringify({}));
       setReviewedAttempt(null);
       setActiveTab('mock-config');
       alert("Device logs initialized successfully!");
@@ -808,24 +1100,41 @@ export default function Dashboard() {
 
   const saveStagedToBank = async () => {
     if (stagedQuestions.length === 0) return;
+    const nowStr = new Date().toISOString();
     const prepared = stagedQuestions.map(q => ({
       ...q,
-      subject: stagingSubject
+      subject: stagingSubject,
+      createdAt: nowStr,
+      updatedAt: nowStr
     }));
     setIsSaving(true);
     setSavingProgress(0);
     setImportSuccess(null);
 
+    const nextQList = [...questions];
+
     try {
       const questionCollection = collection(db, 'questions');
       const total = prepared.length;
       for (let i = 0; i < total; i++) {
-        await addDoc(questionCollection, prepared[i]);
+        const item = prepared[i];
+        const docRef = await addDoc(questionCollection, item);
+        item.id = item.id || docRef.id;
+        (item as any).firestoreId = docRef.id;
+        nextQList.push(item);
         setSavingProgress(Math.round(((i + 1) / total) * 100));
       }
       
-      const nextQList = [...questions, ...prepared];
       saveQuestionsToDB(nextQList);
+
+      // Set system update metadata trigger
+      try {
+        await setDoc(doc(db, "db_metadata", "system"), {
+          lastUpdated: new Date().toISOString()
+        }, { merge: true });
+      } catch (metaErr) {
+        console.error("Failed to write system metadata trigger:", metaErr);
+      }
       
       setImportSuccess(`Successfully added ${prepared.length} questions to ${stagingSubject}!`);
       setStagedQuestions([]);
@@ -846,7 +1155,7 @@ export default function Dashboard() {
     try {
       const offlineQs = JSON.parse(localStorage.getItem('MOCK_OFFLINE_QUESTIONS') || '[]');
       offlineQs.push(q);
-      localStorage.setItem('MOCK_OFFLINE_QUESTIONS', JSON.stringify(offlineQs));
+      safeLocalStorageSetItem('MOCK_OFFLINE_QUESTIONS', JSON.stringify(offlineQs));
     } catch (e) {
       console.error("Failed to queue offline question:", e);
     }
@@ -885,8 +1194,19 @@ export default function Dashboard() {
           correctAnswerIndex: created.correctAnswerIndex,
           explanation: created.explanation,
           subject: created.subject,
-          createdAt: new Date().toISOString()
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
         });
+
+        // Set system update metadata trigger
+        try {
+          await setDoc(doc(db, "db_metadata", "system"), {
+            lastUpdated: new Date().toISOString()
+          }, { merge: true });
+        } catch (metaErr) {
+          console.error("Failed to write system metadata trigger:", metaErr);
+        }
+
         alert("New question successfully saved to cloud database!");
       } catch (err) {
         console.error("Firestore save error, falling back to offline queue:", err);
@@ -909,9 +1229,24 @@ export default function Dashboard() {
     if (window.confirm("Are you sure you want to remove this question?")) {
       const next = questions.filter(q => q.id !== id);
       saveQuestionsToDB(next);
+      try {
+        await deleteQuestionFromIndexedDB(id);
+      } catch (dbErr) {
+        console.error("Failed to delete from IndexedDB:", dbErr);
+      }
+
       if (isOnline) {
         try {
           await deleteDoc(doc(db, "questions", id));
+
+          // Set system update metadata trigger
+          try {
+            await setDoc(doc(db, "db_metadata", "system"), {
+              lastUpdated: new Date().toISOString()
+            }, { merge: true });
+          } catch (metaErr) {
+            console.error("Failed to write system metadata trigger:", metaErr);
+          }
         } catch (err) {
           console.error("Failed to delete from Firestore:", err);
         }
@@ -920,28 +1255,447 @@ export default function Dashboard() {
   };
 
   const handlePrepareQuiz = () => {
-    let eligible = questions;
-    if (quizSubject !== "All Subjects") {
-      eligible = questions.filter(q => q.subject.toLowerCase() === quizSubject.toLowerCase());
-    }
-
-    if (eligible.length === 0) {
-      alert(`No active questions available for "${quizSubject}".`);
+    // Sourced dynamically from Cloud vs local offline storage safeguard
+    const sourcePool = questions;
+    
+    if (sourcePool.length === 0) {
+      alert("No questions found in currently active offline cache or live database. Please synchronise questions or restore internet connection.");
       return;
     }
 
-    const shuffled = [...eligible].sort(() => 0.5 - Math.random());
-    const selected = shuffled.slice(0, Math.min(quizCount, shuffled.length));
+    if (selectedExamId === "custom") {
+      let eligible = sourcePool;
+      if (quizSubject !== "All Subjects") {
+        eligible = sourcePool.filter(q => q.subject.toLowerCase() === quizSubject.toLowerCase());
+      }
 
-    const settings: QuizSettings = {
-      questionCount: selected.length,
-      subject: quizSubject,
-      hasTimer,
-      durationMinutes: timerMinutes
+      if (eligible.length === 0) {
+        alert(`No active questions available for "${quizSubject}".`);
+        return;
+      }
+
+      const shuffled = [...eligible].sort(() => 0.5 - Math.random());
+      const selected = shuffled.slice(0, Math.min(quizCount, shuffled.length));
+
+      const settings: QuizSettings = {
+        questionCount: selected.length,
+        subject: quizSubject,
+        hasTimer,
+        durationMinutes: timerMinutes
+      };
+      
+      setActiveQuizQuestions(selected);
+      setActiveQuizSettings(settings);
+    } else {
+      const exam = examConfigs.find(e => e.id === selectedExamId);
+      if (!exam) {
+        alert("Selected Exam Configuration pattern of targets not found.");
+        return;
+      }
+
+      // Compile questions according to subject pattern mapping with ±2 random offset
+      let compiledList: Question[] = [];
+      const statsReport: string[] = [];
+
+      Object.entries(exam.subjectDistribution).forEach(([subjectName, targetCount]) => {
+        // Filter pool questions matching target subject category case-insensitively
+        const subjectQs = sourcePool.filter(q => q.subject.toLowerCase() === subjectName.toLowerCase());
+        const baseCount = targetCount as number;
+        
+        // ±2 deviation offset selector
+        const randomOffset = Math.floor(Math.random() * 5) - 2; // -2, -1, 0, +1, +2
+        const actualCountNeeded = Math.max(0, baseCount + randomOffset);
+
+        if (subjectQs.length > 0) {
+          const shuffledSub = [...subjectQs].sort(() => 0.5 - Math.random());
+          const selectedSub = shuffledSub.slice(0, Math.min(actualCountNeeded, shuffledSub.length));
+          compiledList = [...compiledList, ...selectedSub];
+          statsReport.push(`${subjectName}: ${selectedSub.length} questions (target: ${baseCount}, offset: ${randomOffset >= 0 ? '+' : ''}${randomOffset})`);
+        } else {
+          statsReport.push(`${subjectName}: 0 questions (No matching subject cached)`);
+        }
+      });
+
+      if (compiledList.length === 0) {
+        alert(`The active question bank pool doesn't contain matching questions for any of the subjects mapped to "${exam.name}". Please load or classify questions into standard subjects (such as ${Object.keys(exam.subjectDistribution).join(', ')}) first!`);
+        return;
+      }
+
+      // Shuffle final compiled list so subjects are distributed throughout the exam
+      compiledList.sort(() => 0.5 - Math.random());
+
+      const settings: QuizSettings = {
+        questionCount: compiledList.length,
+        subject: exam.name,
+        hasTimer: true,
+        durationMinutes: exam.durationMinutes
+      };
+
+      console.log(`Generated exam [${exam.name}]. Distribution stats:\n`, statsReport.join("\n"));
+      alert(`Mock generated for ${exam.name}!\nTotal compiled questions: ${compiledList.length}\nDuration: ${exam.durationMinutes} Minutes.\n\nSubject composition detail:\n${statsReport.join("\n")}`);
+      
+      setActiveQuizQuestions(compiledList);
+      setActiveQuizSettings(settings);
+    }
+  };
+
+  // Admin exam configurations database synced actions
+  const handleUpdateExamConfigOnDB = async (config: ExamConfig) => {
+    if (isOnline) {
+      try {
+        await setDoc(doc(db, "exam_configs", config.id), config as any, { merge: true });
+        // Event change dispatched to keep bytes tracked
+        window.dispatchEvent(new CustomEvent('localstorage_budget_change'));
+      } catch (err) {
+        console.error("Failed to commit exam config to Firestore:", err);
+      }
+    } else {
+      const nextConfigs = examConfigs.map(c => c.id === config.id ? config : c);
+      setExamConfigs(nextConfigs);
+      safeLocalStorageSetItem('MOCK_EXAM_CONFIGS', JSON.stringify(nextConfigs));
+    }
+  };
+
+  const handleDeleteExamConfigFromDB = async (id: string) => {
+    if (window.confirm("Are you sure you want to delete this Entire Exam pattern mapping?")) {
+      const nextConfigs = examConfigs.filter(c => c.id !== id);
+      setExamConfigs(nextConfigs);
+      safeLocalStorageSetItem('MOCK_EXAM_CONFIGS', JSON.stringify(nextConfigs));
+
+      if (isOnline) {
+        try {
+          await deleteDoc(doc(db, "exam_configs", id));
+          // Event change dispatched to keep bytes tracked
+          window.dispatchEvent(new CustomEvent('localstorage_budget_change'));
+        } catch (err) {
+          console.error("Failed to delete exam config:", err);
+        }
+      }
+      setSelectedAdminExamId("");
+      alert("Exam Config Mapping successfully removed.");
+    }
+  };
+
+  const handleCreateNewExamConfig = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const name = newExamName.trim();
+    if (!name) {
+      alert("Please specify a valid Exam name!");
+      return;
+    }
+
+    const newId = `exam-${Date.now()}`;
+    const newConfig: ExamConfig = {
+      id: newId,
+      name: name,
+      durationMinutes: newExamDuration,
+      subjectDistribution: {}
     };
-    
-    setActiveQuizQuestions(selected);
-    setActiveQuizSettings(settings);
+
+    if (isOnline) {
+      try {
+        await setDoc(doc(db, "exam_configs", newId), newConfig as any);
+        alert(`Exam Config [${name}] created! Now add subject weights below.`);
+      } catch (err) {
+        console.error("Failed creating new exam config:", err);
+      }
+    } else {
+      const nextConfigs = [...examConfigs, newConfig];
+      setExamConfigs(nextConfigs);
+      safeLocalStorageSetItem('MOCK_EXAM_CONFIGS', JSON.stringify(nextConfigs));
+      alert(`Exam Config [${name}] created locally!`);
+    }
+
+    setNewExamName("");
+    setSelectedAdminExamId(newId);
+  };
+
+  const handleAddSubjectToConfig = async () => {
+    const exam = examConfigs.find(e => e.id === selectedAdminExamId);
+    if (!exam) {
+      alert("Please select or create an Exam pattern first!");
+      return;
+    }
+
+    const subj = newConfigSubject.trim();
+    if (!subj) {
+      alert("Enter a subject name (such as Geography)!");
+      return;
+    }
+
+    const updatedConfig: ExamConfig = {
+      ...exam,
+      subjectDistribution: {
+        ...exam.subjectDistribution,
+        [subj]: newConfigCount
+      }
+    };
+
+    await handleUpdateExamConfigOnDB(updatedConfig);
+    setNewConfigSubject("");
+    alert(`Subject [${subj}] weight set to ${newConfigCount} questions inside ${exam.name}!`);
+  };
+
+  const handleDeleteSubjectFromConfig = async (subjectKey: string) => {
+    const exam = examConfigs.find(e => e.id === selectedAdminExamId);
+    if (!exam) return;
+
+    const dist = { ...exam.subjectDistribution };
+    delete dist[subjectKey];
+
+    const updatedConfig: ExamConfig = {
+      ...exam,
+      subjectDistribution: dist
+    };
+
+    await handleUpdateExamConfigOnDB(updatedConfig);
+    alert(`Deleted subject [${subjectKey}] from ${exam.name} mapping.`);
+  };
+
+  // Dual-Engine Subject Auto-Classifier and custom sub-topic tagger (AI & Regex fallback)
+  const handleApplySubjectClassification = async (method: 'ai' | 'regex') => {
+    const sourcePool = questions;
+    if (sourcePool.length === 0) {
+      alert("No active questions available in currently active database or cache pool to analyze.");
+      return;
+    }
+
+    setIsClassifying(true);
+    cancelClassificationRef.current = false;
+    setClassificationStatus(`Extracting ${sourcePool.length} questions to process...`);
+
+    if (method === 'ai') {
+      try {
+        setClassificationStatus("Initiating secure connection with server-side AI model gemini-3.5-flash...");
+        
+        const batchSize = 100; // 100 questions per batch to avoid HTTP payload limits and maximize speed
+        const totalQuestions = sourcePool.length;
+        const allClassifications: any[] = [];
+        const totalBatches = Math.ceil(totalQuestions / batchSize);
+
+        for (let i = 0; i < totalQuestions; i += batchSize) {
+          if (cancelClassificationRef.current) {
+            setClassificationStatus("Classification cancelled.");
+            setIsClassifying(false);
+            alert("Subject classification stopped by user.");
+            return;
+          }
+
+          const currentBatchIdx = Math.floor(i / batchSize) + 1;
+          const batchQs = sourcePool.slice(i, i + batchSize).map(q => ({
+            id: q.id,
+            questionText: q.questionText,
+            options: q.options || []
+          }));
+
+          setClassificationStatus(`Processing batch ${currentBatchIdx} of ${totalBatches} (${batchQs.length} questions with Gemini)...`);
+          
+          const response = await fetch('/api/classify-questions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ questions: batchQs })
+          });
+
+          if (!response.ok) {
+            throw new Error(`Cloud classification API response error at batch ${currentBatchIdx}. Status: ${response.status}`);
+          }
+
+          const data = await response.json();
+          if (data.fallbackRequired || !data.success) {
+            console.warn("AI credentials absent or server-side issue. Falling back to local Regex processor...");
+            setClassificationStatus("AI server fallback triggered. Running Regex scanner...");
+            await runLocalRegexClassification();
+            return;
+          }
+
+          const batchClassifications = data.classifications || [];
+          allClassifications.push(...batchClassifications);
+        }
+
+        const list = allClassifications;
+        setClassificationStatus(`Recieved ${list.length} catalogued rows. Committing changes to system database...`);
+
+        // Compute updated full list first
+        const updatedList = questions.map(q => {
+          const hit = list.find((item: any) => item.id === q.id);
+          if (hit) {
+            return {
+              ...q,
+              subject: hit.subject,
+              topic: hit.tag || "General",
+              updatedAt: new Date().toISOString()
+            };
+          }
+          return q;
+        });
+
+        saveQuestionsToDB(updatedList);
+
+        // Update active database or local memory
+        if (isOnline) {
+          const batch = writeBatch(db);
+          let matchCount = 0;
+          list.forEach((item: any) => {
+            const tgt = questions.find(q => q.id === item.id);
+            if (tgt) {
+              const docRef = doc(db, "questions", tgt.id);
+              batch.update(docRef, {
+                subject: item.subject,
+                topic: item.tag || "General",
+                updatedAt: new Date().toISOString()
+              });
+              matchCount++;
+            }
+          });
+          if (matchCount > 0) {
+            await batch.commit();
+
+            try {
+              await setDoc(doc(db, "db_metadata", "system"), {
+                lastUpdated: new Date().toISOString()
+              }, { merge: true });
+            } catch (metaErr) {
+              console.error("Failed to write system metadata trigger:", metaErr);
+            }
+          }
+        } else {
+          // If offline mode is active, update offline pool directly
+          const updatedOffline = offlineDownloadedQuestions.map(q => {
+            const hit = list.find((item: any) => item.id === q.id);
+            if (hit) {
+              return { ...q, subject: hit.subject, topic: hit.tag || "General", updatedAt: new Date().toISOString() };
+            }
+            return q;
+          });
+          setOfflineDownloadedQuestions(updatedOffline);
+          safeLocalStorageSetItem('MOCK_OFFLINE_DOWNLOADED_QUESTIONS', JSON.stringify(updatedOffline));
+        }
+
+        alert(`Sensational! Generative AI (Gemini 3.5 Flash) successfully completed analyzing and tagging ${list.length} questions with categories (e.g. Polity, Mathematics) and standard subtopics (e.g. Rajasthan Polity, Indian Constitution, World Geography, Trigonometry, etc.)!`);
+      } catch (err: any) {
+        console.error("AI service error, falling back locally:", err);
+        setClassificationStatus("AI error. Running high-speed Regex processor fallback...");
+        await runLocalRegexClassification();
+      } finally {
+        setIsClassifying(false);
+        setClassificationStatus("");
+      }
+    } else {
+      await runLocalRegexClassification();
+      setIsClassifying(false);
+      setClassificationStatus("");
+    }
+  };
+
+  const runLocalRegexClassification = async () => {
+    setClassificationStatus("Analyzing vocabulary patterns in statements...");
+    let updatedCount = 0;
+    const source = questions;
+
+    const rajasthanKeywords = [
+      "rajasthan", "jaipur", "jodhpur", "udaipur", "bikaner", "kota", "alwar", "bharatpur", "ajmer", 
+      "mewar", "marwar", "sanga", "pratap", "maldeo", "अरावली", "राजस्थान", "जयपुर", "जोधपुर", "उदयपुर", 
+      "बावड़ी", "राजस्थानी", "मेवाड़", "मारवाड़", "दुर्ग", "शिशोदिया", "राठौड़", "कछवाहा", "चौहान", "पृथ्वीराज"
+    ];
+
+    const newList = source.map(q => {
+      const text = q.questionText.toLowerCase();
+      const isRajasthan = rajasthanKeywords.some(kw => text.includes(kw));
+
+      let determinedSubject = q.subject || "General Studies";
+      let determinedTopic = q.topic || "General";
+
+      const isWorldGeo = text.includes("world") || text.includes("ocean") || text.includes("continent") || 
+                         text.includes("pacific") || text.includes("atlantic") || text.includes("indian ocean") || 
+                         text.includes("equator") || text.includes("latitude") || text.includes("longitude") || 
+                         text.includes("meridian") || text.includes("globe") || text.includes("earth") || 
+                         text.includes("विश्व") || text.includes("महाद्वीप") || text.includes("महासागर") || 
+                         text.includes("अक्षांश") || text.includes("देशांतर") || text.includes("भूमध्य");
+
+      if (text.includes("article") || text.includes("constitution") || text.includes("amendment") || text.includes("parliament") || text.includes("president") || text.includes("democracy") || text.includes("polity") || text.includes("अनुच्छेद") || text.includes("संविधान") || text.includes("अधिकार") || text.includes("विधानसभा") || text.includes("राज्यपाल") || text.includes("मुख्यमंत्री") || text.includes("पंचायत") || text.includes("नगरपालिका") || text.includes("लोकसभा") || text.includes("राज्यसभा")) {
+        determinedSubject = "Polity";
+        determinedTopic = isRajasthan ? "Rajasthan Polity" : "Indian Polity";
+        updatedCount++;
+      } else if (text.includes("ratio") || text.includes("radius") || text.includes("probability") || text.includes("digit") || text.includes("algebra") || text.includes("trigonometry") || text.includes("triangle") || text.includes("geometry") || text.includes("equations") || text.includes("fraction") || text.includes("percentage") || text.includes("average") || text.includes("sum of") || text.includes("त्रिकोणमिति") || text.includes("समीकरण") || text.includes("औसत")) {
+        determinedSubject = "Mathematics";
+        determinedTopic = "Quantitative Aptitude";
+        updatedCount++;
+      } else if (text.includes("computer") || text.includes("ram") || text.includes("rom") || text.includes("cpu") || text.includes("software") || text.includes("hardware") || text.includes("microsoft") || text.includes("windows") || text.includes("internet") || text.includes("ms office") || text.includes("word") || text.includes("excel") || text.includes("powerpoint") || text.includes("input device") || text.includes("output device") || text.includes("memory") || text.includes("कंप्यूटर") || text.includes("सॉफ्टवेयर") || text.includes("हार्डवेयर") || text.includes("इंटरनेट")) {
+        determinedSubject = "Computer";
+        determinedTopic = "Computer Awareness";
+        updatedCount++;
+      } else if (text.includes("hindi") || text.includes("हिंदी") || text.includes("व्याकरण") || text.includes("संधि") || text.includes("समास") || text.includes("पर्यायवाची") || text.includes("विलोम") || text.includes("मुहावरे") || text.includes("संज्ञा") || text.includes("सर्वनाम") || text.includes("विशेषण") || text.includes("क्रिया") || text.includes("तद्भव") || text.includes("तत्सम") || text.includes("कारक") || text.includes("काल") || text.includes("वचन")) {
+        determinedSubject = "Hindi";
+        determinedTopic = "Hindi Grammar";
+        updatedCount++;
+      } else if (text.includes("chemical") || text.includes("conductivity") || text.includes("thermal") || text.includes("gravity") || text.includes("cell") || text.includes("physics") || text.includes("atoms") || text.includes("molecule") || text.includes("element") || text.includes("force") || text.includes("organism") || text.includes("विटामिन") || text.includes("कोशिका") || text.includes("तत्व") || text.includes("ऊर्जा") || text.includes("प्रकाश") || text.includes("ध्वनि") || text.includes("रोग") || text.includes("धातु") || text.includes("अधातु")) {
+        determinedSubject = "Science";
+        determinedTopic = "General Science";
+        updatedCount++;
+      } else if (text.includes("geography") || text.includes("latitude") || text.includes("longitude") || text.includes("continents") || text.includes("river") || text.includes("monsoon") || text.includes("mountain") || text.includes("ocean") || text.includes("soil") || text.includes("country") || text.includes("capital of") || text.includes("नदी") || text.includes("पर्वत") || text.includes("पहाड़") || text.includes("जलवायु") || text.includes("मानसून") || text.includes("मिट्टी") || text.includes("पठार") || text.includes("मरुस्थल") || text.includes("महासागर")) {
+        determinedSubject = "Geography";
+        determinedTopic = isWorldGeo ? "World Geography" : (isRajasthan ? "Rajasthan Geography" : "Indian Geography");
+        updatedCount++;
+      } else if (text.includes("olympic") || text.includes("cricket") || text.includes("medal") || text.includes("trophy") || text.includes("sport") || text.includes("awarded") || text.includes("cup") || text.includes("sports") || text.includes("खेल")) {
+        determinedSubject = "Sports";
+        determinedTopic = "Sports & Awards";
+        updatedCount++;
+      } else if (text.includes("g20") || text.includes("summit") || text.includes("budget") || text.includes("scheme") || text.includes("ministry") || text.includes("news") || text.includes("current affairs") || text.includes("बजट") || text.includes("समिट")) {
+        determinedSubject = "Current Affairs";
+        determinedTopic = "Current Affairs 2026";
+        updatedCount++;
+      } else if (text.includes("history") || text.includes("dynasty") || text.includes("battle") || text.includes("mugal") || text.includes("british") || text.includes("ancient") || text.includes("civilization") || text.includes("शासक") || text.includes("युद्ध") || text.includes("शिलालेख") || text.includes("सभ्यता") || text.includes("रियासत") || text.includes("मौर्य") || text.includes("गुप्त")) {
+        determinedSubject = "History";
+        determinedTopic = isRajasthan ? "Rajasthan History" : "Indian History";
+        updatedCount++;
+      } else if (text.includes("coding") || text.includes("reasoning") || text.includes("analogy") || text.includes("series") || text.includes("direction") || text.includes("pattern") || text.includes("puzzle") || text.includes("कोडिंग") || text.includes("सादृश्यता") || text.includes("श्रेणी")) {
+        determinedSubject = "Reasoning";
+        determinedTopic = "Logical Reasoning";
+        updatedCount++;
+      } else if (text.includes("grammar") || text.includes("synonym") || text.includes("antonym") || text.includes("preposition") || text.includes("english") || text.includes("verb") || text.includes("noun")) {
+        determinedSubject = "English";
+        determinedTopic = "English Grammar";
+        updatedCount++;
+      } else if (text.includes("culture") || text.includes("art") || text.includes("mela") || text.includes("temple") || text.includes("dance") || text.includes("song") || text.includes("मेला") || text.includes("त्यौहार") || text.includes("नृत्य") || text.includes("वाद्य") || text.includes("वेशभूषा") || text.includes("कला") || text.includes("साहित्य") || text.includes("गीत") || text.includes("लोकनृत्य") || text.includes("दुर्ग") || text.includes("छतरी") || text.includes("हवेली")) {
+        determinedSubject = "Culture";
+        determinedTopic = isRajasthan ? "Rajasthan Art & Culture" : "Indian Art & Culture";
+        updatedCount++;
+      }
+
+      return {
+        ...q,
+        subject: determinedSubject,
+        topic: determinedTopic
+      };
+    });
+
+    // Save results to local memory and persistent high-speed IndexedDB
+    saveQuestionsToDB(newList);
+
+    if (isOnline) {
+      const batch = writeBatch(db);
+      newList.forEach(q => {
+        batch.set(doc(db, "questions", q.id), {
+          ...q,
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+      });
+      await batch.commit();
+
+      // Trigger system metadata update notification
+      try {
+        await setDoc(doc(db, "db_metadata", "system"), {
+          lastUpdated: new Date().toISOString()
+        }, { merge: true });
+      } catch (metaErr) {
+        console.error("Failed to write system metadata trigger:", metaErr);
+      }
+    } else {
+      setOfflineDownloadedQuestions(newList);
+      safeLocalStorageSetItem('MOCK_OFFLINE_DOWNLOADED_QUESTIONS', JSON.stringify(newList));
+    }
+
+    alert(`Pattern Match completed! Analyzed standard keywords and successfully re-classified/tagged ${updatedCount} matching records into localized Indian and Rajasthan subjects!`);
   };
 
   const handleFinishQuiz = (attempt: TestAttempt) => {
@@ -965,11 +1719,138 @@ export default function Dashboard() {
         };
       });
       setLocalReviewBank(updatedLocalReview);
-      localStorage.setItem('MOCK_REVIEW_STATES', JSON.stringify(updatedLocalReview));
+      safeLocalStorageSetItem('MOCK_REVIEW_STATES', JSON.stringify(updatedLocalReview));
     }
     
     setActiveQuizQuestions(null);
     setActiveQuizSettings(null);
+  };
+
+  const handleScanAndPurgeDuplicates = async () => {
+    if (questions.length === 0) {
+      alert("No active questions available in currently active database or cache pool to scan.");
+      return;
+    }
+
+    setIsScanningDuplicates(true);
+    setDuplicateScanStatus("Comparing question text statements under 99% similarity threshold...");
+
+    setTimeout(async () => {
+      try {
+        const pool = [...questions];
+        const toDeleteIds: string[] = [];
+
+        // To make it very fast, preprocess stripped lower text
+        const preprocessed = pool.map(q => ({
+          q,
+          cleanText: (q.questionText || "").replace(/\s+/g, "").toLowerCase()
+        }));
+
+        for (let i = 0; i < preprocessed.length; i++) {
+          const item1 = preprocessed[i];
+          if (toDeleteIds.includes(item1.q.id)) continue;
+
+          for (let j = i + 1; j < preprocessed.length; j++) {
+            const item2 = preprocessed[j];
+            if (toDeleteIds.includes(item2.q.id)) continue;
+
+            const text1 = item1.cleanText;
+            const text2 = item2.cleanText;
+            if (!text1 || !text2) continue;
+
+            const len1 = text1.length;
+            const len2 = text2.length;
+            const maxLen = Math.max(len1, len2);
+            const minLen = Math.min(len1, len2);
+
+            // If length difference is more than 1.5%, they cannot be >= 99% similar
+            if ((maxLen - minLen) / maxLen > 0.015) {
+              continue;
+            }
+
+            // Calculation of Row-optimized Levenshtein
+            let prevRow = Array(len2 + 1);
+            let currRow = Array(len2 + 1);
+            for (let k = 0; k <= len2; k++) prevRow[k] = k;
+
+            for (let r = 1; r <= len1; r++) {
+              currRow[0] = r;
+              for (let c = 1; c <= len2; c++) {
+                const cost = text1[r - 1] === text2[c - 1] ? 0 : 1;
+                currRow[c] = Math.min(
+                  currRow[c - 1] + 1,
+                  prevRow[c] + 1,
+                  prevRow[c - 1] + cost
+                );
+              }
+              const temp = prevRow;
+              prevRow = currRow;
+              currRow = temp;
+            }
+
+            const distance = prevRow[len2];
+            const similarity = 1.0 - (distance / maxLen);
+
+            if (similarity >= 0.99) {
+              toDeleteIds.push(item2.q.id);
+            }
+          }
+        }
+
+        if (toDeleteIds.length === 0) {
+          setIsScanningDuplicates(false);
+          setDuplicateScanStatus("");
+          alert("✓ Scanning Completed: No near-duplicate questions (99%+ match similarity) were detected in your database.");
+          return;
+        }
+
+        const confirmMsg = `🔍 Scan Results: Found ${toDeleteIds.length} duplicate question(s) that match 99% or more. \n\nAre you sure you want to PERMANENTLY auto-delete all these duplicates from the database and preserve only one copy of each?`;
+        
+        if (window.confirm(confirmMsg)) {
+          setDuplicateScanStatus(`Deleting ${toDeleteIds.length} duplicate entries from database...`);
+          
+          // Filter current local state
+          const remainingPool = questions.filter(q => !toDeleteIds.includes(q.id));
+          saveQuestionsToDB(remainingPool);
+
+          // Permanently delete from Firebase Firestore database if online
+          if (isOnline) {
+            const batchSize = 100;
+            const totalToDel = toDeleteIds.length;
+            for (let i = 0; i < totalToDel; i += batchSize) {
+              const currentBatchIds = toDeleteIds.slice(i, i + batchSize);
+              const batch = writeBatch(db);
+              currentBatchIds.forEach(id => {
+                batch.delete(doc(db, "questions", id));
+              });
+              await batch.commit();
+            }
+
+            // Set system update metadata trigger
+            try {
+              await setDoc(doc(db, "db_metadata", "system"), {
+                lastUpdated: new Date().toISOString()
+              }, { merge: true });
+            } catch (metaErr) {
+              console.error("Failed to write system metadata trigger:", metaErr);
+            }
+          } else {
+            // Also clean up local offline downloaded cache list if present
+            const nextOffline = offlineDownloadedQuestions.filter(q => !toDeleteIds.includes(q.id));
+            setOfflineDownloadedQuestions(nextOffline);
+            safeLocalStorageSetItem('MOCK_OFFLINE_DOWNLOADED_QUESTIONS', JSON.stringify(nextOffline));
+          }
+
+          alert(`✓ Success! Permanently deleted ${toDeleteIds.length} duplicate question(s) from the database. Only one unique copy remains!`);
+        }
+      } catch (err) {
+        console.error("Failed to delete duplicates:", err);
+        alert("An error occurred while cleaning up duplicate questions.");
+      } finally {
+        setIsScanningDuplicates(false);
+        setDuplicateScanStatus("");
+      }
+    }, 1000);
   };
 
   const toggleBookmark = (id: string) => {
@@ -982,29 +1863,35 @@ export default function Dashboard() {
     };
     
     setLocalReviewBank(updatedLocalReview);
-    localStorage.setItem('MOCK_REVIEW_STATES', JSON.stringify(updatedLocalReview));
+    safeLocalStorageSetItem('MOCK_REVIEW_STATES', JSON.stringify(updatedLocalReview));
   };
 
-  const getAvailableSubjects = () => {
+  const taggedQuestionsCount = useMemo(() => {
+    return questions.filter(q => q.topic && q.topic !== "" && q.topic !== "General" && q.topic !== "General Knowledge Studies").length;
+  }, [questions]);
+
+  const availableSubjects = useMemo(() => {
     const list = new Set<string>();
     questions.forEach(q => {
       if (q.subject) list.add(q.subject);
     });
     return Array.from(list);
-  };
+  }, [questions]);
 
-  const availableSubjects = getAvailableSubjects();
-
-  const getFilteredQuestions = () => {
+  const filteredQuestions = useMemo(() => {
+    const queryLower = searchQuery.toLowerCase();
+    const subjectLower = filterSubject.toLowerCase();
     return questions.filter(q => {
-      const matchSearch = q.questionText.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                          q.options.some(opt => opt.toLowerCase().includes(searchQuery.toLowerCase()));
-      const matchFilter = filterSubject === "All" || q.subject.toLowerCase() === filterSubject.toLowerCase();
-      return matchSearch && matchFilter;
+      const qText = q.questionText || "";
+      const matchSearch = searchQuery === "" || 
+                          qText.toLowerCase().includes(queryLower) || 
+                          (q.options && q.options.some((opt: string) => opt.toLowerCase().includes(queryLower)));
+      const matchFilter = filterSubject === "All" || (q.subject && q.subject.toLowerCase() === subjectLower);
+      const isClassified = q.topic && q.topic !== "" && q.topic !== "General" && q.topic !== "General Knowledge Studies";
+      const matchClassified = !filterClassifiedOnly || isClassified;
+      return matchSearch && matchFilter && matchClassified;
     });
-  };
-
-  const filteredQuestions = getFilteredQuestions();
+  }, [questions, searchQuery, filterSubject, filterClassifiedOnly]);
 
   const totalTests = attempts.length;
   const avgAccuracy = totalTests > 0 
@@ -1043,7 +1930,9 @@ export default function Dashboard() {
     }));
   };
 
-  const deviceReviewQuestions = questions.filter(q => localReviewBank[q.id]?.isBookmarked || localReviewBank[q.id]?.needsReview);
+  const deviceReviewQuestions = useMemo(() => {
+    return questions.filter(q => localReviewBank[q.id]?.isBookmarked || localReviewBank[q.id]?.needsReview);
+  }, [questions, localReviewBank]);
 
   if (activeQuizQuestions && activeQuizSettings) {
     return (
@@ -1071,7 +1960,6 @@ export default function Dashboard() {
             </div>
             <div>
               <h1 className="text-xl font-black tracking-tight text-indigo-900 dark:text-indigo-400 font-display">AT <span className="text-indigo-500 font-black">MOCK</span></h1>
-              <p className="text-[10px] text-slate-400 dark:text-slate-500 font-black uppercase tracking-widest leading-none mt-0.5 tracking-tighter"></p>
             </div>
           </div>
 
@@ -1079,13 +1967,13 @@ export default function Dashboard() {
             <div className="flex items-center space-x-1.5 border border-slate-100 dark:border-slate-800 rounded-full px-3 py-1 bg-slate-50 dark:bg-slate-850 text-xs font-medium">
               {isOnline ? (
                 <>
-                  <Wifi className="h-3.5 w-3.5 text-emerald-500 animate-pulse" />
+                  <Wifi className="h-3.5 w-3.5 text-emerald-500" />
                   <span className="text-emerald-700 dark:text-emerald-400 text-[10px] font-bold uppercase tracking-wider">Active</span>
                 </>
               ) : (
                 <>
                   <Wifi className="h-3.5 w-3.5 text-amber-500" />
-                  <span className="text-amber-700 dark:text-amber-400 text-[10px] font-bold uppercase tracking-wider">Offline</span>
+                  <span className="text-amber-700 dark:text-amber-400 text-[10px] font-bold uppercase tracking-wider">Offline Mode</span>
                 </>
               )}
             </div>
@@ -1375,7 +2263,7 @@ export default function Dashboard() {
                   <div className="flex justify-between items-start mb-6 border-b border-slate-100 dark:border-slate-800/50 pb-4">
                     <div>
                       <h3 className="text-xl font-black tracking-tight font-display">Launch New Mock Test</h3>
-                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Configure real-time assessment parameters</p>
+                      <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Select an Admin-defined Exam pattern or configure custom parameters</p>
                     </div>
                     <div className="bg-indigo-50 dark:bg-indigo-950/40 p-2 rounded-xl border border-indigo-100 dark:border-indigo-900">
                       <Settings className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
@@ -1383,45 +2271,128 @@ export default function Dashboard() {
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                    {/* Left Column: Exam Selection */}
                     <div className="space-y-6">
                       <div>
-                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2.5 ml-1">Practice Subject</label>
+                        <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2.5 ml-1">Target Exam / Practice Mode</label>
                         <div className="relative">
                           <select 
-                            value={quizSubject}
-                            onChange={(e) => setQuizSubject(e.target.value)}
-                            className="w-full bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-750 px-4 py-3.5 rounded-2xl text-xs font-bold appearance-none outline-none focus:ring-2 focus:ring-indigo-500/20 text-slate-900 dark:text-slate-100"
+                            value={selectedExamId}
+                            onChange={(e) => setSelectedExamId(e.target.value)}
+                            className="w-full bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-755 px-4 py-3.5 rounded-2xl text-xs font-bold appearance-none outline-none focus:ring-2 focus:ring-indigo-500/20 text-indigo-700 dark:text-indigo-400"
                           >
-                            <option className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">All Subjects</option>
-                            {availableSubjects.map(sub => (
-                              <option key={sub} value={sub} className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">{sub}</option>
+                            <option value="custom" className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">Custom Practice Quiz</option>
+                            {examConfigs.map(config => (
+                              <option key={config.id} value={config.id} className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">
+                                🏆 {config.name}
+                              </option>
                             ))}
                           </select>
-                          <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                          <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-indigo-500 pointer-events-none" />
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2.5 ml-1">Question Count</label>
-                          <input 
-                            type="number"
-                            value={quizCount}
-                            onChange={(e) => setQuizCount(Math.max(1, parseInt(e.target.value) || 0))}
-                            className="w-full bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-750 px-4 py-3.5 rounded-2xl text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500/20 text-slate-900 dark:text-slate-100"
-                          />
+                      {/* Render custom options ONLY for custom exam mode */}
+                      {selectedExamId === "custom" ? (
+                        <div className="space-y-6 animate-fade-in">
+                          <div>
+                            <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2.5 ml-1">Practice Subject</label>
+                            <div className="relative">
+                              <select 
+                                value={quizSubject}
+                                onChange={(e) => setQuizSubject(e.target.value)}
+                                className="w-full bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-750 px-4 py-3.5 rounded-2xl text-xs font-bold appearance-none outline-none focus:ring-2 focus:ring-indigo-500/20 text-slate-900 dark:text-slate-100"
+                              >
+                                <option className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">All Subjects</option>
+                                {availableSubjects.map(sub => (
+                                  <option key={sub} value={sub} className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">{sub}</option>
+                                ))}
+                              </select>
+                              <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2.5 ml-1">Question Count</label>
+                              <input 
+                                type="number"
+                                value={quizCount}
+                                onChange={(e) => setQuizCount(Math.max(1, parseInt(e.target.value) || 0))}
+                                className="w-full bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-750 px-4 py-3.5 rounded-2xl text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500/20 text-slate-900 dark:text-slate-100"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2.5 ml-1">Time (Minutes)</label>
+                              <input 
+                                type="number"
+                                value={timerMinutes}
+                                max={180}
+                                onChange={(e) => setTimerMinutes(Math.min(180, Math.max(1, parseInt(e.target.value) || 0)))}
+                                className="w-full bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-750 px-4 py-3.5 rounded-2xl text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500/20 text-slate-900 dark:text-slate-100"
+                              />
+                            </div>
+                          </div>
                         </div>
-                        <div>
-                          <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2.5 ml-1">Time (Minutes)</label>
-                          <input 
-                            type="number"
-                            value={timerMinutes}
-                            max={180}
-                            onChange={(e) => setTimerMinutes(Math.min(180, Math.max(1, parseInt(e.target.value) || 0)))}
-                            className="w-full bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-750 px-4 py-3.5 rounded-2xl text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-500/20 text-slate-900 dark:text-slate-100"
-                            disabled={!hasTimer}
-                          />
-                        </div>
+                      ) : (
+                        /* Locked, Synced Preset parameters visualization */
+                        (() => {
+                          const conf = examConfigs.find(e => e.id === selectedExamId);
+                          if (!conf) return null;
+                          const totalQuestionsMapped = Object.values(conf.subjectDistribution).reduce((sum, num) => (sum as number) + (num as number), 0);
+                          return (
+                            <div className="bg-indigo-50/50 dark:bg-indigo-950/20 border border-indigo-150/40 p-5 rounded-2xl space-y-4 animate-fade-in text-left">
+                              <div className="flex items-center justify-between text-[10px] font-black text-indigo-650 dark:text-indigo-400 uppercase tracking-widest">
+                                <span>🔒 Synced Parameters</span>
+                                <span className="bg-indigo-200 dark:bg-indigo-800 text-[9px] px-1.5 py-0.5 rounded">Admin Setup Locked</span>
+                              </div>
+                              
+                              <div className="grid grid-cols-2 gap-4">
+                                <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-100 dark:border-slate-800">
+                                  <span className="text-[9px] text-slate-400 uppercase tracking-widest block font-bold leading-none mb-1">Time Limit</span>
+                                  <span className="text-sm font-black font-mono text-indigo-600 dark:text-indigo-400">{conf.durationMinutes} Minutes</span>
+                                </div>
+                                <div className="bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-100 dark:border-slate-800">
+                                  <span className="text-[9px] text-slate-400 uppercase tracking-widest block font-bold leading-none mb-1">Total questions</span>
+                                  <span className="text-sm font-black font-mono text-indigo-600 dark:text-indigo-400">{totalQuestionsMapped} MCQs</span>
+                                </div>
+                              </div>
+                              
+                              <p className="text-[10px] text-slate-400">
+                                *Generating this mock automatically compiles categorized questions matching subject layouts, with a random <b>±2 question offset deviation</b> for optimal exam simulation.
+                              </p>
+                            </div>
+                          );
+                        })()
+                      )}
+                    </div>
+
+                    {/* Right Column: Dynamic summary of available count per category */}
+                    <div className="bg-slate-50/50 dark:bg-slate-900/40 p-5 border border-slate-200/60 dark:border-slate-850 rounded-3xl text-left space-y-4.5">
+                      <span className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest block">📊 Question Bank Category Density</span>
+                      
+                      <div className="space-y-3 max-h-48 overflow-y-auto pr-1">
+                        {(() => {
+                          const activeCounts: Record<string, number> = {};
+                          questions.forEach(q => {
+                            const sub = q.subject || "General";
+                            activeCounts[sub] = (activeCounts[sub] || 0) + 1;
+                          });
+
+                          const items = Object.entries(activeCounts);
+                          if (items.length === 0) {
+                            return <p className="text-xs font-bold text-slate-400 py-3 text-center">Active pool is empty. Please synchronise questions first.</p>;
+                          }
+
+                          return items.map(([subj, count]) => (
+                            <div key={subj} className="flex justify-between items-center bg-white dark:bg-slate-850 p-2.5 rounded-xl border border-slate-100 dark:border-slate-800">
+                              <span className="text-xs font-bold text-slate-600 dark:text-slate-350">{subj}</span>
+                              <span className="text-[10px] font-bold font-mono bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 px-2 py-0.5 rounded-md">
+                                {count} available
+                              </span>
+                            </div>
+                          ));
+                        })()}
                       </div>
                     </div>
                   </div>
@@ -1437,7 +2408,7 @@ export default function Dashboard() {
                       }`}
                     >
                       <Check className="h-5 w-5" />
-                      <span>START TEST</span>
+                      <span>START FULL-SCREEN QUIZ</span>
                     </button>
                     <button 
                       onClick={() => {
@@ -1542,6 +2513,203 @@ export default function Dashboard() {
               </div>
             )}
 
+            {activeTab === 'offline-manager' && !reviewedAttempt && (
+              <div className="space-y-6 animate-fade-in">
+                {/* Card header */}
+                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm">
+                  <h2 className="text-xl font-black font-display text-indigo-900 dark:text-indigo-400">Offline Cache & Storage Safeguard Hub</h2>
+                  <p className="text-xs text-slate-400 font-medium mt-1">
+                    Manage the local storage storage of mock questions on your device. We enforce a strict 4.0 MB safety ceiling to optimize memory footprints and avoid browser crashes.
+                  </p>
+                  
+                  {/* Live stats */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6 border-t border-slate-100 dark:border-slate-800 pt-6">
+                    {/* Capacity bar */}
+                    <div>
+                      <div className="flex justify-between items-center mb-2">
+                        <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Device storage space</span>
+                        <span className="text-xs font-mono font-black text-indigo-600 dark:text-indigo-400">
+                          {(localBytesUsage / 1024).toFixed(1)} KB / 4.0 MB ({Math.round((localBytesUsage / (4 * 1024 * 1024)) * 100)}%)
+                        </span>
+                      </div>
+                      
+                      {/* Progress bar */}
+                      <div className="w-full bg-slate-100 dark:bg-slate-800 rounded-full h-3.5 overflow-hidden">
+                        <div 
+                          className={`h-full transition-all duration-500 rounded-full ${
+                            (localBytesUsage / (4 * 1024 * 1024)) > 0.9 
+                              ? 'bg-rose-500' 
+                              : (localBytesUsage / (4 * 1024 * 1024)) > 0.5 
+                                ? 'bg-amber-500' 
+                                : 'bg-emerald-500'
+                          }`}
+                          style={{ width: `${Math.min(100, Math.round((localBytesUsage / (4 * 1024 * 1024)) * 100))}%` }}
+                        />
+                      </div>
+                      <p className="text-[10px] text-slate-400 mt-2">
+                        *Questions and mock attempts are cached automatically inside client local storage. After 4MB, old trials are preserved while blocking further overflow.
+                      </p>
+                    </div>
+                    
+                    {/* Offline simulation button */}
+                    <div className="bg-slate-50 dark:bg-slate-850 p-4 rounded-xl border border-slate-200 dark:border-slate-750 flex flex-col justify-between">
+                      <div>
+                        <h4 className="text-xs font-bold uppercase tracking-wider">Simulator Connection Options</h4>
+                        <p className="text-[11px] text-slate-400 mt-1">
+                          Toggle Offline Cache Simulator Mode to verify mock generator behavior when disconnected from live database servers.
+                        </p>
+                      </div>
+                      
+                      <button
+                        onClick={() => {
+                          setForceOfflineMode(!forceOfflineMode);
+                          alert(forceOfflineMode ? "Live Cloud Synchronization Restored!" : "Simulated Offline Cache Mode Engaged! Questions will generate from local downloaded pool.");
+                        }}
+                        className={`mt-4 w-full py-2.5 px-4 rounded-xl text-xs font-extrabold uppercase transition active:scale-95 text-center cursor-pointer ${
+                          forceOfflineMode 
+                            ? 'bg-amber-500 hover:bg-amber-600 text-white shadow shadow-amber-500/20' 
+                            : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow shadow-indigo-600/20'
+                        }`}
+                      >
+                        {forceOfflineMode ? "⚠️ DISENGAGE OFFLINE SIMULATION" : "🔌 ENGAGE OFFLINE SIMULATION"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Subject-wise download options */}
+                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm">
+                  <h4 className="text-sm font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">Subject-wise Download Terminal</h4>
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    Filter and download questions subject-by-subject. Questions will be safely stored locally under the 4MB safeguard to keep you practicing offline!
+                  </p>
+                  
+                  {/* List subjects with numbers of questions in each */}
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3.5 my-6">
+                    {(() => {
+                      const subCounts: Record<string, number> = {};
+                      // We compute count from the live database pool (questions) since they download from cloud
+                      questions.forEach(q => {
+                        const s = q.subject || "General";
+                        subCounts[s] = (subCounts[s] || 0) + 1;
+                      });
+                      
+                      const distinctSubjects = Object.keys(subCounts);
+                      if (distinctSubjects.length === 0) {
+                        return <div className="col-span-full text-center py-4 text-xs font-bold text-slate-400 text-slate-400">Cloud database seems empty! Upload spreadsheet first to cache questions.</div>;
+                      }
+                      
+                      return distinctSubjects.map(sub => {
+                        const count = subCounts[sub];
+                        const isChecked = selectedOfflineSubjects.includes(sub);
+                        return (
+                          <label 
+                            key={sub}
+                            className={`p-3 rounded-xl border flex items-center justify-between cursor-pointer hover:bg-indigo-50/20 transition ${
+                              isChecked 
+                                ? 'border-indigo-500 bg-indigo-55/20 text-indigo-700 dark:text-indigo-300' 
+                                : 'border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-850 text-slate-600 dark:text-slate-450'
+                            }`}
+                          >
+                            <div className="flex items-center space-x-2.5">
+                              <input 
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={() => {
+                                  if (isChecked) {
+                                    setSelectedOfflineSubjects(prev => prev.filter(s => s !== sub));
+                                  } else {
+                                    setSelectedOfflineSubjects(prev => [...prev, sub]);
+                                  }
+                                }}
+                                className="rounded text-indigo-600 h-4 w-4"
+                              />
+                              <span className="text-xs font-bold">{sub}</span>
+                            </div>
+                            <span className="text-[10px] font-mono bg-slate-200 dark:bg-slate-755 px-1.5 py-0.5 rounded text-slate-500 shrink-0">
+                              {count} Qs
+                            </span>
+                          </label>
+                        );
+                      });
+                    })()}
+                  </div>
+
+                  {/* Actions buttons */}
+                  <div className="flex flex-col sm:flex-row items-center gap-4 border-t border-slate-100 dark:border-slate-850 pt-6">
+                    <button
+                      onClick={async () => {
+                        if (selectedOfflineSubjects.length === 0) {
+                          alert("Please select at least one subject checkbox to download!");
+                          return;
+                        }
+
+                        // Gather all questions matching selected subjects
+                        const matchingQuestions = questions.filter(q => 
+                          selectedOfflineSubjects.some(sub => q.subject.toLowerCase() === sub.toLowerCase())
+                        );
+
+                        if (matchingQuestions.length === 0) {
+                          alert("No matching questions detected in cloud database!");
+                          return;
+                        }
+
+                        // Test serialized length predicted
+                        const serialized = JSON.stringify(matchingQuestions);
+                        const matchingBytes = serialized.length * 2;
+                        
+                        if (matchingBytes > LOCAL_STORAGE_MAX_BYTES) {
+                          alert(`Cannot download selected questions! Size of selected batch would be ${(matchingBytes / (1024 * 1024)).toFixed(2)} MB, exceeding the 4MB maximum limit. Please select fewer subjects!`);
+                          return;
+                        }
+
+                        // Save
+                        const success = safeLocalStorageSetItem('MOCK_OFFLINE_DOWNLOADED_QUESTIONS', serialized);
+                        if (success) {
+                          setOfflineDownloadedQuestions(matchingQuestions);
+                          alert(`Successfully cached ${matchingQuestions.length} questions of subjects [${selectedOfflineSubjects.join(", ")}] to offline local storage! Size is ${(matchingBytes / 1024).toFixed(1)} KB.`);
+                        } else {
+                          alert("Local capacity bounds violated! Reduce question count to save.");
+                        }
+                      }}
+                      className="w-full sm:flex-1 py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl text-xs font-black uppercase tracking-widest cursor-pointer shadow-lg shadow-emerald-600/10 transition active:scale-95 text-center"
+                    >
+                      📥 Cached Selected Subjects to Device
+                    </button>
+                    
+                    <button
+                      onClick={() => {
+                        if (window.confirm("Are you sure you want to delete all offline cached questions? This will free memory instantly but disable offline quizzes.")) {
+                          localStorage.removeItem('MOCK_OFFLINE_DOWNLOADED_QUESTIONS');
+                          setOfflineDownloadedQuestions([]);
+                          // Dispatch budget updates
+                          window.dispatchEvent(new CustomEvent('localstorage_budget_change'));
+                          alert("Device cached questions successfully deleted.");
+                        }
+                      }}
+                      className="w-full sm:w-auto py-3.5 px-6 border border-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/20 text-rose-600 rounded-2xl text-xs font-black uppercase tracking-widest cursor-pointer transition active:scale-95 text-center"
+                    >
+                      🗑️ Wipe Offline Questions
+                    </button>
+                  </div>
+
+                  {/* Cached overview status */}
+                  <div className="mt-6 bg-slate-50 dark:bg-slate-850 p-4 border border-slate-200 dark:border-slate-850 rounded-xl text-left">
+                    <span className="text-[10px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest block mb-2">Device Cache Overview</span>
+                    <div className="text-xs font-bold text-slate-500 space-y-1">
+                      <div>📶 Active Online Loop: <span className="text-slate-800 dark:text-slate-200 uppercase">{questions.length} questions in firestore</span></div>
+                      <div>🔌 Device Cached Pool: <span className="text-slate-800 dark:text-slate-200 uppercase">{offlineDownloadedQuestions.length} downloaded questions</span></div>
+                      <div>📡 Active Quiz Engine Status: {
+                        (forceOfflineMode || !isOnline) 
+                          ? <span className="text-amber-500 uppercase">OFFLINE MODE (Running on {offlineDownloadedQuestions.length} cached questions)</span>
+                          : <span className="text-emerald-500 uppercase">ONLINE ACTIVE (Syncing on {questions.length} database questions)</span>
+                      }</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {activeTab === 'questions' && !reviewedAttempt ? (
               <div className="space-y-6">
                 <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-6 shadow-sm transition-colors">
@@ -1551,13 +2719,31 @@ export default function Dashboard() {
                       <p className="text-[11px] text-slate-400 mt-0.5">Edit, add, or delete single questions in your database.</p>
                     </div>
 
-                    <button
-                      onClick={() => setIsFormOpen(!isFormOpen)}
-                      className="flex h-10 items-center justify-center space-x-1 px-4 text-xs font-semibold bg-rose-600 hover:bg-rose-700 text-white rounded-xl shadow cursor-pointer transition-all shrink-0"
-                    >
-                      <Plus className="h-4 w-4" />
-                      <span>Create Single MCQ Manually</span>
-                    </button>
+                    <div className="flex flex-wrap items-center gap-2.5">
+                      {isScanningDuplicates ? (
+                        <div className="flex h-10 items-center space-x-2 bg-slate-50 dark:bg-slate-850 px-4 border border-slate-200 dark:border-slate-800 rounded-xl text-xs font-semibold text-slate-500">
+                          <Activity className="h-3.5 w-3.5 animate-spin text-indigo-505" />
+                          <span>{duplicateScanStatus || "Scanning..."}</span>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={handleScanAndPurgeDuplicates}
+                          className="flex h-10 items-center justify-center space-x-2 px-4 text-xs font-extrabold border border-indigo-200 dark:border-indigo-800 bg-indigo-50/50 dark:bg-indigo-950/20 text-indigo-650 dark:text-indigo-400 rounded-xl shadow-sm hover:bg-indigo-100/50 dark:hover:bg-indigo-100/10 cursor-pointer transition-all shrink-0"
+                          title="Identify 99%+ verbatim similar questions and wipe them permanently"
+                        >
+                          <Copy className="h-4 w-4 text-indigo-500" />
+                          <span>Scan & Purge Duplicates</span>
+                        </button>
+                      )}
+
+                      <button
+                        onClick={() => setIsFormOpen(!isFormOpen)}
+                        className="flex h-10 items-center justify-center space-x-1 px-4 text-xs font-semibold bg-rose-600 hover:bg-rose-700 text-white rounded-xl shadow cursor-pointer transition-all shrink-0"
+                      >
+                        <Plus className="h-4 w-4" />
+                        <span>Create Single MCQ Manually</span>
+                      </button>
+                    </div>
                   </div>
 
                   {isFormOpen && (
@@ -1650,6 +2836,99 @@ export default function Dashboard() {
                   )}
                 </div>
 
+                {/* Gemini-powered Classifications & Autotagging Control Center */}
+                <div className="bg-slate-50 dark:bg-slate-900 border border-slate-250 dark:border-slate-800 rounded-3xl p-5 shadow-sm transition-colors relative overflow-hidden">
+                  <div className="absolute top-0 right-0 p-4 opacity-[0.05] dark:opacity-[0.1]">
+                    <Sparkles className="w-16 h-16 text-indigo-500" />
+                  </div>
+
+                  <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-5">
+                    <div className="space-y-1 text-left">
+                      <div className="flex items-center space-x-2">
+                        <span className="flex-shrink-0 inline-flex items-center justify-center p-1 bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 rounded-lg">
+                          <Sparkles className="w-4 h-4 animate-pulse text-indigo-650" />
+                        </span>
+                        <h4 className="text-xs font-black tracking-widest text-slate-800 dark:text-slate-100 uppercase font-mono">
+                          Gemini AI Classification Daemon
+                        </h4>
+                      </div>
+                      <p className="text-[11px] text-slate-400 max-w-xl font-sans leading-relaxed">
+                        Uses Google Gemini 3.5 Flash server-side to automatically organize, label, and tag questions into core subjects (Geography, Polity, Science, Computer, Mathematics, Hindi, English, Reasoning) and precise subtopics based on text context.
+                      </p>
+                    </div>
+
+                    {/* Statistics Indicator */}
+                    <div className="w-full md:w-auto shrink-0 bg-white dark:bg-slate-950/80 border border-slate-205 dark:border-slate-850 p-3.5 rounded-2xl min-w-[210px] shadow-sm">
+                      <div className="flex justify-between items-center text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1.5 font-mono">
+                        <span>Classification ratio</span>
+                        <span className="text-indigo-600 dark:text-indigo-400 font-extrabold">
+                          {Math.round((taggedQuestionsCount / Math.max(1, questions.length)) * 100)}%
+                        </span>
+                      </div>
+                      <div className="text-[11px] font-bold text-slate-700 dark:text-slate-300 font-sans">
+                        🏷️ <span className="text-indigo-600 dark:text-indigo-400 font-black">{taggedQuestionsCount}</span> / {questions.length} Tagged & Indexed
+                      </div>
+                      <div className="w-full bg-slate-100 dark:bg-slate-800 h-1.5 rounded-full mt-2 overflow-hidden">
+                        <div 
+                          className="bg-indigo-600 h-full rounded-full transition-all duration-700" 
+                          style={{ width: `${(taggedQuestionsCount / Math.max(1, questions.length)) * 100}%` }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800/60 flex flex-wrap items-center justify-between gap-3.5">
+                    {isClassifying ? (
+                      <div className="flex-1 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-amber-500/5 border border-amber-500/20 px-3.5 py-2.5 rounded-xl animate-pulse">
+                        <div className="flex items-center space-x-2.5 text-left">
+                          <Activity className="h-4.5 w-4.5 text-amber-500 animate-spin shrink-0" />
+                          <div>
+                            <span className="text-[10px] font-extrabold text-amber-700 dark:text-amber-400 block uppercase tracking-wider font-mono">Autopilot Running / वर्ग वर्गीकरण जारी...</span>
+                            <span className="text-[11px] text-slate-600 dark:text-slate-300 font-sans leading-tight block">{classificationStatus}</span>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => { cancelClassificationRef.current = true; }}
+                          className="px-4 py-1.5 bg-red-650 hover:bg-red-750 text-white font-extrabold text-[9px] uppercase rounded-lg tracking-widest transition shadow-md active:scale-95 cursor-pointer"
+                        >
+                          ⛔ STOP AI AUTOPILOT
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="text-[10px] text-slate-405 font-bold font-sans uppercase tracking-wide">
+                          {taggedQuestionsCount === questions.length ? (
+                            <span className="text-emerald-600 dark:text-emerald-400 font-extrabold uppercase">✓ All questions catalogued & tagged successfully!</span>
+                          ) : (
+                            <span>Let Gemini tag the remaining <strong className="text-indigo-600 dark:text-indigo-400">{questions.length - taggedQuestionsCount}</strong> untagged questions.</span>
+                          )}
+                        </div>
+
+                        <div className="flex items-center space-x-2.5">
+                          <button
+                            onClick={() => handleApplySubjectClassification('ai')}
+                            className="bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white px-4.5 py-2.5 rounded-xl text-xs font-black tracking-wider transition flex items-center space-x-1.5 cursor-pointer shadow hover:shadow-indigo-500/10 uppercase"
+                          >
+                            <Sparkles className="w-3.5 h-3.5 text-rose-200 animate-pulse shrink-0" />
+                            <span>🚀 Start Gemini Autopilot</span>
+                          </button>
+
+                          <button
+                            onClick={() => handleApplySubjectClassification('regex')}
+                            className="bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-750 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-750 active:scale-95 px-3.5 py-2.5 rounded-xl text-xs font-extrabold transition flex items-center space-x-1.5 cursor-pointer"
+                            title="Run local high-speed pattern keywords lookups offline"
+                          >
+                            <LayoutGrid className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                            <span>Run Local Regex Scanner</span>
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+
                 <div className="flex flex-col sm:flex-row items-center justify-between gap-4 card-row">
                   <div className="relative flex-1 w-full">
                     <Search className="absolute left-3 top-3.5 h-3.5 w-3.5 text-slate-400 shrink-0" />
@@ -1662,18 +2941,33 @@ export default function Dashboard() {
                     />
                   </div>
 
-                  <div className="flex items-center space-x-2 w-full sm:w-auto">
-                    <span className="text-xs font-bold text-slate-400 uppercase shrink-0">Filter:</span>
-                    <select
-                      value={filterSubject}
-                      onChange={(e) => setFilterSubject(e.target.value)}
-                      className="w-full sm:w-44 text-xs font-semibold h-10 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 rounded-xl px-3 outline-none text-slate-900 dark:text-slate-100"
+                  <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
+                    <div className="flex items-center space-x-2">
+                      <span className="text-xs font-bold text-slate-400 uppercase shrink-0">Filter:</span>
+                      <select
+                        value={filterSubject}
+                        onChange={(e) => setFilterSubject(e.target.value)}
+                        className="w-full sm:w-44 text-xs font-semibold h-10 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 rounded-xl px-3 outline-none text-slate-900 dark:text-slate-100"
+                      >
+                        <option value="All" className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">All Subjects</option>
+                        {availableSubjects.map((sub, idx) => (
+                          <option key={idx} value={sub} className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">{sub}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <button
+                      onClick={() => setFilterClassifiedOnly(prev => !prev)}
+                      className={`h-10 px-3.5 rounded-xl text-xs font-bold flex items-center space-x-1.5 transition-all outline-none border cursor-pointer ${
+                        filterClassifiedOnly
+                          ? 'bg-emerald-500/10 text-emerald-600 border-emerald-300 dark:border-emerald-700'
+                          : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-500 hover:bg-slate-50'
+                      }`}
+                      title="Show only classified / auto-tagged standard questions"
                     >
-                      <option value="All" className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">All Subjects</option>
-                      {availableSubjects.map((sub, idx) => (
-                        <option key={idx} value={sub} className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">{sub}</option>
-                      ))}
-                    </select>
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>{filterClassifiedOnly ? "Showing Classified Only" : "Show Classified Only"}</span>
+                    </button>
                   </div>
                 </div>
 
@@ -1696,7 +2990,12 @@ export default function Dashboard() {
                           >
                             <div>
                               <div className="flex items-center justify-between mb-3.5">
-                                <span className="text-[9px] font-bold text-rose-500 bg-rose-500/10 px-2 rounded-md py-0.5 uppercase tracking-wider">{q.subject}</span>
+                                <div className="flex flex-wrap gap-1.5 items-center">
+                                  <span className="text-[9px] font-bold text-rose-500 bg-rose-500/10 px-2 rounded-md py-0.5 uppercase tracking-wider">{q.subject}</span>
+                                  {q.topic && q.topic !== "General" && q.topic !== "" && (
+                                    <span className="text-[9px] font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-500/10 border border-indigo-150/40 dark:border-indigo-850/40 px-2 rounded-md py-0.5 uppercase tracking-wider">🏷️ {q.topic}</span>
+                                  )}
+                                </div>
                                 <div className="flex items-center space-x-2">
                                   <button
                                     onClick={() => toggleBookmark(q.id)}
@@ -1905,7 +3204,7 @@ export default function Dashboard() {
       {/* GLOBAL MODALS */}
       {isAdminModalOpen && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200" onClick={() => setIsAdminModalOpen(false)}>
-          <div className="bg-white dark:bg-slate-900 w-full max-w-sm rounded-[2.5rem] shadow-2xl border border-white/20 overflow-hidden animate-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
+          <div className="bg-white dark:bg-slate-900 w-full max-w-3xl rounded-[2.5rem] shadow-2xl border border-white/20 overflow-hidden animate-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()}>
             <div className="p-8">
               <div className="flex justify-between items-center mb-6">
                 <div className="flex items-center space-x-3">
@@ -1961,70 +3260,227 @@ export default function Dashboard() {
                   </button>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 gap-3">
-                   <form onSubmit={handleAddNewSubjectTag} className="p-3.5 bg-slate-50 dark:bg-slate-850 rounded-2xl border border-slate-200 dark:border-slate-750 mb-2">
-                     <label className="block text-[10px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest mb-1.5">Add Custom Bulk Subject Tag</label>
-                     <div className="flex space-x-2">
-                       <input 
-                         type="text" 
-                         value={newCustomTagInput} 
-                         onChange={(e) => setNewCustomTagInput(e.target.value)}
-                         placeholder="e.g. Geography Level 1" 
-                         className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-[11px] font-bold px-2.5 py-1.5 rounded-xl outline-none text-slate-900 dark:text-slate-100"
-                       />
-                       <button type="submit" className="bg-indigo-600 hover:bg-indigo-700 text-white p-2 rounded-xl transition-all">
-                         <Plus className="w-3.5 h-3.5" />
-                       </button>
-                     </div>
-                   </form>
-
-                   <button
-                    onClick={() => { setActiveTab('questions'); setReviewedAttempt(null); setIsAdminModalOpen(false); }}
-                    className="flex items-center space-x-4 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-850 hover:bg-indigo-50 dark:hover:bg-indigo-950/20 hover:border-indigo-200 transition-all text-left"
-                  >
-                    <div className="bg-white dark:bg-slate-900 p-2 rounded-xl shadow-sm border border-slate-100 dark:border-slate-800">
-                      <LayoutGrid className="h-5 w-5 text-indigo-600" />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 text-left animate-in fade-in duration-200">
+                  {/* Left Column: Subject Patterns & Exam Configuration */}
+                  <div className="space-y-5 border-r border-slate-100 dark:border-slate-800/60 pr-0 md:pr-6">
+                    <div className="border-b border-slate-100 dark:border-slate-800/50 pb-2">
+                      <h4 className="text-xs font-black text-indigo-700 dark:text-indigo-400 uppercase tracking-widest">Exam Pattern & Subject Weights</h4>
+                      <p className="text-[10px] text-slate-400">Configure exam layouts, add subjects, and set question limits.</p>
                     </div>
+
+                    {/* Selector of current config mapping */}
                     <div>
-                      <div className="text-xs font-black text-slate-800 dark:text-slate-200 uppercase tracking-wide">Question Bank</div>
-                      <div className="text-[10px] text-slate-400 font-medium">Manage and edit bank</div>
+                      <label className="block text-[9px] font-black text-slate-400 uppercase tracking-wider mb-1">Select Exam to Edit</label>
+                      <select
+                        value={selectedAdminExamId}
+                        onChange={(e) => setSelectedAdminExamId(e.target.value)}
+                        className="w-full bg-slate-50 dark:bg-slate-850 border border-slate-200 dark:border-slate-750 px-3 py-2 rounded-xl text-xs font-bold outline-none text-slate-705 dark:text-slate-300"
+                      >
+                        <option value="">-- Create New Pattern --</option>
+                        {examConfigs.map(c => (
+                          <option key={c.id} value={c.id}>{c.name} ({c.durationMinutes}m)</option>
+                        ))}
+                      </select>
                     </div>
-                  </button>
 
-                  <button
-                    onClick={() => { setIsUploadModalOpen(true); setIsAdminModalOpen(false); }}
-                    className="flex items-center space-x-4 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-850 hover:bg-indigo-50 dark:hover:bg-indigo-950/20 hover:border-indigo-200 transition-all text-left"
-                  >
-                    <div className="bg-white dark:bg-slate-900 p-2 rounded-xl shadow-sm border border-slate-100 dark:border-slate-800">
-                      <FileCode className="h-5 w-5 text-indigo-600" />
-                    </div>
-                    <div>
-                      <div className="text-xs font-black text-slate-800 dark:text-slate-200 uppercase tracking-wide">Bulk Extractor</div>
-                      <div className="text-[10px] text-slate-400 font-medium">HTML Mock Parsing</div>
-                    </div>
-                  </button>
+                    {selectedAdminExamId ? (
+                      (() => {
+                        const targetPattern = examConfigs.find(c => c.id === selectedAdminExamId);
+                        if (!targetPattern) return null;
+                        return (
+                          <div className="space-y-4 animate-fade-in bg-slate-50/50 dark:bg-slate-850 p-4 rounded-2xl border border-slate-200/50 dark:border-slate-755">
+                            <div className="flex justify-between items-center">
+                              <span className="text-xs font-black text-slate-700 dark:text-slate-350 truncate">{targetPattern.name} Setup</span>
+                              <button
+                                onClick={() => handleDeleteExamConfigFromDB(targetPattern.id)}
+                                className="text-[10px] bg-red-100 hover:bg-red-200 dark:bg-red-955 text-red-650 px-2.5 py-1 rounded-md font-bold transition"
+                              >
+                                Delete Exam
+                              </button>
+                            </div>
 
-                  <button
-                    onClick={() => { handleResetDatabase(); setIsAdminModalOpen(false); }}
-                    className="flex items-center space-x-4 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-850 hover:bg-rose-50 dark:hover:bg-rose-950/20 hover:border-rose-200 transition-all text-left group"
-                  >
-                    <div className="bg-white dark:bg-slate-900 p-2 rounded-xl shadow-sm border border-slate-100 dark:border-slate-800">
-                      <Trash2 className="h-5 w-5 text-rose-500 group-hover:scale-110 transition-transform" />
-                    </div>
-                    <div>
-                      <div className="text-xs font-black text-slate-800 dark:text-slate-200 uppercase tracking-wide">Master Reset</div>
-                      <div className="text-[10px] text-slate-400 font-medium">Wipe all practice data</div>
-                    </div>
-                  </button>
+                            {/* Subjects Distribution List */}
+                            <div className="space-y-1.5 max-h-32 overflow-y-auto">
+                              {Object.entries(targetPattern.subjectDistribution).length === 0 ? (
+                                <p className="text-[10px] text-slate-400 italic">No subject targets mapped. Make additions below.</p>
+                              ) : (
+                                Object.entries(targetPattern.subjectDistribution).map(([subjKey, valCount]) => (
+                                  <div key={subjKey} className="flex justify-between items-center text-xs bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 p-2 rounded-lg">
+                                    <span className="font-bold text-slate-650 dark:text-slate-355">{subjKey}</span>
+                                    <div className="flex items-center space-x-2">
+                                      <span className="bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 px-1.5 py-0.5 rounded text-[10px] font-mono font-black">{valCount} Qs</span>
+                                      <button 
+                                        onClick={() => handleDeleteSubjectFromConfig(subjKey)}
+                                        className="text-slate-450 hover:text-red-500 p-1 transition"
+                                        title="Delete mapped subject"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
+                                  </div>
+                                ))
+                              )}
+                            </div>
 
-                  <button 
-                    onClick={() => setIsAdminAuthenticated(false)}
-                    className="mt-4 py-2 border border-slate-100 dark:border-slate-800 rounded-xl text-[9px] font-black text-slate-400 hover:text-rose-500 uppercase tracking-widest text-center transition-colors"
-                  >
-                    Sign Out Administrator
-                  </button>
+                            {/* Add subject weight parameters form */}
+                            <div className="border-t border-slate-200/60 dark:border-slate-755 pt-3.5 space-y-2.5">
+                              <span className="text-[9px] font-black text-indigo-650 dark:text-indigo-400 uppercase tracking-widest block font-sans">Add/Update Pattern Subject</span>
+                              
+                              <div className="grid grid-cols-2 gap-2">
+                                <input 
+                                  type="text"
+                                  placeholder="Subject (e.g. History)"
+                                  value={newConfigSubject}
+                                  onChange={(e) => setNewConfigSubject(e.target.value)}
+                                  className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-755 px-2.5 py-2 rounded-xl text-xs font-bold outline-none text-slate-850 dark:text-white"
+                                />
+                                <input 
+                                  type="number"
+                                  placeholder="Limit"
+                                  value={newConfigCount}
+                                  onChange={(e) => setNewConfigCount(Math.max(1, parseInt(e.target.value) || 0))}
+                                  className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-755 px-2.5 py-2 rounded-xl text-xs font-bold outline-none text-slate-850 dark:text-white"
+                                />
+                              </div>
+                              <button
+                                onClick={handleAddSubjectToConfig}
+                                className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-[10px] uppercase rounded-xl shadow-md tracking-wider transition active:scale-95 text-center"
+                              >
+                                Save Subject Layout Spec
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })()
+                    ) : (
+                      /* Create New Exam Form */
+                      <form onSubmit={handleCreateNewExamConfig} className="bg-indigo-50/20 dark:bg-indigo-950/10 p-4 rounded-2xl border border-indigo-150/50 space-y-3.5 animate-fade-in">
+                        <span className="text-[10px] font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest block text-left font-sans">New Exam Configuration Spec</span>
+                        <div>
+                          <label className="block text-[9px] font-black text-slate-400 uppercase mb-1 font-sans">Exam Name</label>
+                          <input 
+                            type="text"
+                            placeholder="e.g. SSC CGL Tier 2"
+                            value={newExamName}
+                            onChange={(e) => setNewExamName(e.target.value)}
+                            className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-750 px-3 py-2 rounded-xl text-xs font-bold font-sans outline-none text-slate-855 dark:text-white"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[9px] font-black text-slate-400 uppercase mb-1 font-sans">Exam Time (Minutes)</label>
+                          <input 
+                            type="number"
+                            placeholder="60"
+                            value={newExamDuration}
+                            onChange={(e) => setNewExamDuration(Math.max(1, parseInt(e.target.value) || 0))}
+                            className="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-755 px-3 py-2 rounded-xl text-xs font-bold font-sans outline-none text-slate-855 dark:text-white"
+                          />
+                        </div>
+                        <button
+                          type="submit"
+                          className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-[10px] uppercase rounded-xl shadow-lg tracking-widest transition"
+                        >
+                          ➕ REGISTER NEW EXAM PATTERN
+                        </button>
+                      </form>
+                    )}
+                  </div>
+
+                  {/* Right Column: AI Auto Classifiers & Console Shortcuts */}
+                  <div className="space-y-4">
+                    <div className="border-b border-slate-100 dark:border-slate-800/50 pb-2">
+                      <h4 className="text-xs font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-widest font-sans animate-pulse">AI & Regex Auto-Classifier Services</h4>
+                      <p className="text-[10px] text-slate-400 font-sans">Classifies entire raw question datasets into standard subjects.</p>
+                    </div>
+
+                    {isClassifying ? (
+                      <div className="p-5 border border-amber-200 bg-amber-500/10 rounded-2xl text-center space-y-3.5 animate-pulse">
+                        <Activity className="h-6 w-6 text-amber-500 mx-auto animate-spin shrink-0" />
+                        <span className="text-xs font-extrabold text-amber-700 dark:text-amber-300 block uppercase tracking-wider font-mono">Classification Status</span>
+                        <p className="text-[11px] text-slate-500 leading-normal">{classificationStatus}</p>
+                        <button
+                          type="button"
+                          onClick={() => { cancelClassificationRef.current = true; }}
+                          className="px-4 py-1.5 bg-red-650 hover:bg-red-750 text-white font-extrabold text-[9px] uppercase rounded-lg tracking-widest transition shadow hover:shadow-red-500/10 active:scale-95 cursor-pointer block mx-auto"
+                        >
+                          ⛔ Stop Classifying / रोकें
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 gap-2.5">
+                        <button
+                          onClick={() => handleApplySubjectClassification('ai')}
+                          className="flex items-center space-x-3.5 p-3.5 bg-gradient-to-r from-violet-650 via-indigo-600 to-indigo-700 text-white rounded-2xl shadow hover:scale-[1.01] transition-transform active:scale-95 text-left cursor-pointer"
+                        >
+                          <Sparkles className="w-5 h-5 shrink-0 text-emerald-300" />
+                          <div>
+                            <div className="text-xs font-extrabold uppercase tracking-wider text-rose-100 font-sans">🛡️ Gemini Generative intelligence</div>
+                            <div className="text-[10px] text-indigo-300 font-medium font-sans">Automatically parses categories & adds tags</div>
+                          </div>
+                        </button>
+
+                        <button
+                          onClick={() => handleApplySubjectClassification('regex')}
+                          className="flex items-center space-x-3.5 p-3.5 bg-slate-50 dark:bg-slate-850 hover:bg-indigo-50/40 dark:hover:bg-indigo-950/20 rounded-2xl border border-slate-200 dark:border-slate-800 transition active:scale-95 text-left cursor-pointer text-slate-800 dark:text-slate-200"
+                        >
+                          <LayoutGrid className="w-5 h-5 text-indigo-500 shrink-0" />
+                          <div>
+                            <div className="text-xs font-extrabold uppercase tracking-wide font-sans">⚡ High-Speed Pattern Regex Scan</div>
+                            <div className="text-[10px] text-slate-400 font-medium font-sans font-sans">Scans text indices instantly offline</div>
+                          </div>
+                        </button>
+                      </div>
+                    )}
+
+                    <form onSubmit={handleAddNewSubjectTag} className="p-3.5 bg-slate-50 dark:bg-slate-850 rounded-2xl border border-slate-200 dark:border-slate-750">
+                      <label className="block text-[10px] font-black text-indigo-650 dark:text-indigo-400 uppercase tracking-widest mb-1.5 font-sans">Add Custom Bulk Subject Tag</label>
+                      <div className="flex space-x-2">
+                        <input 
+                          type="text" 
+                          value={newCustomTagInput} 
+                          onChange={(e) => setNewCustomTagInput(e.target.value)}
+                          placeholder="e.g. Geography Level 1" 
+                          className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-[11px] font-bold px-2.5 py-1.5 rounded-xl outline-none text-slate-900 dark:text-slate-100"
+                        />
+                        <button type="submit" className="bg-indigo-600 hover:bg-indigo-700 text-white p-2 rounded-xl transition-all">
+                          <Plus className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </form>
+
+                    {/* Quick navigation links */}
+                    <div className="grid grid-cols-3 gap-2 pt-1 font-sans">
+                      <button
+                        onClick={() => { setActiveTab('questions'); setReviewedAttempt(null); setIsAdminModalOpen(false); }}
+                        className="bg-slate-50 dark:bg-slate-850 hover:bg-indigo-50 border border-slate-150 dark:border-slate-800 text-center p-2 rounded-xl text-[10px] font-bold text-slate-700 dark:text-slate-350 cursor-pointer"
+                      >
+                        Q-Bank
+                      </button>
+                      <button
+                        onClick={() => { setIsUploadModalOpen(true); setIsAdminModalOpen(false); }}
+                        className="bg-slate-50 dark:bg-slate-850 hover:bg-indigo-50 border border-slate-150 dark:border-slate-800 text-center p-2 rounded-xl text-[10px] font-bold text-slate-700 dark:text-slate-350 cursor-pointer"
+                      >
+                        HTML Parse
+                      </button>
+                      <button
+                        onClick={() => { handleResetDatabase(); setIsAdminModalOpen(false); }}
+                        className="bg-red-50 hover:bg-red-100 dark:bg-rose-950/20 border border-rose-100 dark:border-slate-800 p-2 rounded-xl text-[10px] font-bold text-rose-600 cursor-pointer"
+                      >
+                        Master Reset
+                      </button>
+                    </div>
+
+                    <div className="flex items-center justify-end border-t border-slate-100 dark:border-slate-800/80 pt-3 mt-1.5 font-sans">
+                      <button 
+                        onClick={() => setIsAdminAuthenticated(false)}
+                        className="py-1 px-3 border border-slate-200 dark:border-slate-850 rounded-xl text-[9px] font-black text-slate-400 hover:text-red-500 uppercase tracking-widest text-center transition-colors"
+                      >
+                        Sign Out Administrator
+                      </button>
+                    </div>
+                  </div>
                 </div>
-               )}
+              )}
             </div>
           </div>
         </div>
