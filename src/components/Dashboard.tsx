@@ -753,11 +753,14 @@ export default function Dashboard() {
             const systemDoc = await getDocs(query(collection(db, "db_metadata")));
             trackFirestoreRead(systemDoc.empty ? 1 : systemDoc.size);
             if (!systemDoc.empty) {
-              const sysData = systemDoc.docs[0].data();
-              const lastUpdated = sysData.lastUpdated || '';
-              if (lastUpdated && lastUpdated <= localLastSynced) {
-                needsSync = false;
-                console.log(`Cloud database has not changed since last sync (${lastUpdated}). Consumed EXACTLY 1 read!`);
+              const sysDoc = systemDoc.docs.find(d => d.id === "system");
+              const sysData = sysDoc ? sysDoc.data() : null;
+              if (sysData) {
+                const lastUpdated = sysData.lastUpdated || '';
+                if (lastUpdated && lastUpdated <= localLastSynced) {
+                  needsSync = false;
+                  console.log(`Cloud database has not changed since last sync (${lastUpdated}). Consumed EXACTLY 1 read!`);
+                }
               }
             }
           } catch (metadataError) {
@@ -826,6 +829,20 @@ export default function Dashboard() {
         // If IndexedDB is empty, triggers automatic first-time full sync
         console.log("IndexedDB empty! Firing standard bootstrap first-time full database checkout...");
         try {
+          // Check system metadata totalQuestionsCount to verify chunk integrity
+          let expectedCloudTotal = 0;
+          try {
+            const systemMetaSnap = await getDocs(query(collection(db, "db_metadata")));
+            trackFirestoreRead(systemMetaSnap.empty ? 1 : systemMetaSnap.size);
+            const sysDoc = systemMetaSnap.docs.find(d => d.id === "system");
+            if (sysDoc) {
+              expectedCloudTotal = sysDoc.data().totalQuestionsCount || 0;
+              console.log(`Expected total questions in cloud system metadata: ${expectedCloudTotal}`);
+            }
+          } catch (metaErr) {
+            console.warn("Could not fetch metadata expected total, proceeding optimistically:", metaErr);
+          }
+
           // ⚡ HIGH-SPEED BOOST: Check and fetch chunked bundles first (Uses <1% of the daily reads!)
           console.log("High-Speed Boost: Querying pre-compiled database chunks...");
           let loadedFromChunks = false;
@@ -847,19 +864,83 @@ export default function Dashboard() {
                       subject: q.subject || "General Studies",
                       targetExam: q.targetExam || "",
                       correctAnswerIndex: typeof q.correctAnswerIndex === 'number' ? q.correctAnswerIndex : 0,
-                      correctAnswer: q.correctAnswer || ""
+                      correctAnswer: q.correctAnswer || "",
+                      updatedAt: q.updatedAt || q.createdAt || "",
+                      createdAt: q.createdAt || ""
                     } as Question);
                   });
                 }
               });
               
-              if (compiledList.length > 0) {
+              // Only load from chunks if they are non-empty and match the expected total count in a stable range (over 25 items fallback threshold)
+              const isValidChunks = compiledList.length > 0 && (expectedCloudTotal === 0 ? compiledList.length > 25 : compiledList.length >= expectedCloudTotal);
+              
+              if (isValidChunks) {
                 console.log(`✓ High-speed download complete. Loaded ${compiledList.length} questions from chunks in just ${chunkSnap.size} reads instead of ${compiledList.length} reads!`);
                 await saveQuestionsToIndexedDB(compiledList);
                 setQuestions(compiledList);
-                localStorage.setItem('MOCK_LAST_SYNCED_TIME', new Date().toISOString());
+                
+                let maxTime = '2000-01-01T00:00:00.000Z';
+                compiledList.forEach(q => {
+                  const qTime = q.updatedAt || q.createdAt || '';
+                  if (qTime > maxTime) {
+                    maxTime = qTime;
+                  }
+                });
+                
+                localStorage.setItem('MOCK_LAST_SYNCED_TIME', maxTime);
                 setIsQuotaExceeded(false);
                 loadedFromChunks = true;
+
+                // Sync live database questions modified or added since this chunk's threshold
+                try {
+                  console.log(`Checking for incremental updates since chunk creation context: ${maxTime}`);
+                  const incSnap = await getDocs(query(
+                    collection(db, "questions"),
+                    where("updatedAt", ">", maxTime)
+                  ));
+                  trackFirestoreRead(incSnap.empty ? 1 : incSnap.size);
+                  if (!incSnap.empty) {
+                    console.log(`Found ${incSnap.size} newer/differential questions in live database. Merging into local storage...`);
+                    const finalMerged = [...compiledList];
+                    incSnap.forEach(docSnap => {
+                      const qData = docSnap.data();
+                      const rawQuestionText = qData.questionText || "";
+                      const rawExplanation = qData.explanation || "";
+                      const rawOptions = Array.isArray(qData.options) ? qData.options : [];
+                      const rawSubject = qData.subject || "";
+                      const qObj: Question = {
+                        ...qData,
+                        firestoreId: docSnap.id,
+                        id: qData.id || docSnap.id,
+                        questionText: rawQuestionText,
+                        explanation: rawExplanation,
+                        options: rawOptions.map((opt: any) => String(opt)),
+                        subject: rawSubject
+                      } as unknown as Question;
+
+                      const existingIdx = finalMerged.findIndex(x => x.id === qObj.id);
+                      if (existingIdx > -1) {
+                        finalMerged[existingIdx] = qObj;
+                      } else {
+                        finalMerged.push(qObj);
+                      }
+
+                      const qTime = qData.updatedAt || qData.createdAt || '';
+                      if (qTime > maxTime) {
+                        maxTime = qTime;
+                      }
+                    });
+
+                    await saveQuestionsToIndexedDB(finalMerged);
+                    setQuestions(finalMerged);
+                    localStorage.setItem('MOCK_LAST_SYNCED_TIME', maxTime);
+                  }
+                } catch (incErr) {
+                  console.warn("Bootstrap incremental check failed:", incErr);
+                }
+              } else {
+                console.log(`Database chunks found but they are incomplete (${compiledList.length} loaded vs ${expectedCloudTotal} expected). Skipping chunks to fetch full live collection...`);
               }
             }
           } catch (chunkErr) {
@@ -1211,7 +1292,9 @@ export default function Dashboard() {
           correctAnswerIndex: q.correctAnswerIndex !== undefined ? q.correctAnswerIndex : 0,
           explanation: q.explanation || "",
           subject: q.subject || "General Studies",
-          targetExam: q.targetExam || ""
+          targetExam: q.targetExam || "",
+          updatedAt: q.updatedAt || "",
+          createdAt: q.createdAt || ""
         }));
 
         await setDoc(doc(db, "questions_chunks", `chunk_${i}`), {
@@ -1226,7 +1309,8 @@ export default function Dashboard() {
       // Set system update metadata trigger
       await setDoc(doc(db, "db_metadata", "system"), {
         lastUpdated: new Date().toISOString(),
-        chunksCount: chunksCount
+        chunksCount: chunksCount,
+        totalQuestionsCount: listToProcess.length
       }, { merge: true });
       trackFirestoreWrite(1);
 
@@ -2345,14 +2429,14 @@ export default function Dashboard() {
                   onClick={() => { setActiveTab('review-bank'); setReviewedAttempt(null); setIsWorkspaceMenuOpen(false); }}
                   className={`w-full flex items-center space-x-3 text-xs font-black uppercase p-3.5 rounded-2xl border transition-all ${
                     activeTab === 'review-bank' && !reviewedAttempt
-                      ? 'bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-850 text-rose-600 dark:text-rose-400 shadow-md shadow-rose-100/10'
-                      : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-850 text-slate-500 hover:text-indigo-600'
+                      ? 'bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-850 text-rose-600 dark:text-rose-450 shadow-md shadow-rose-100/10'
+                      : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-855 text-slate-500 hover:text-rose-650'
                   }`}
                 >
                   <AlertCircle className="w-4.5 h-4.5 shrink-0" />
                   <div className="flex-1 flex items-center justify-between text-left">
                     <span>Review Bank</span>
-                    <span className="bg-rose-200 dark:bg-rose-800 text-[10px] text-rose-500 font-bold font-mono px-1.5 py-0.5 rounded-md shrink-0">
+                    <span className="bg-rose-200 dark:bg-rose-800 text-[10px] text-rose-505 font-bold font-mono px-1.5 py-0.5 rounded-md shrink-0">
                       {deviceReviewQuestions.length}
                     </span>
                   </div>
@@ -2364,41 +2448,14 @@ export default function Dashboard() {
                     onClick={() => { setActiveTab('flagged-manager'); setReviewedAttempt(null); setIsWorkspaceMenuOpen(false); }}
                     className={`w-full flex items-center space-x-3 text-xs font-black uppercase p-3.5 rounded-2xl border transition-all ${
                       activeTab === 'flagged-manager'
-                        ? 'bg-red-50 dark:bg-red-950/40 border-red-200 text-red-600 shadow-md shadow-red-100/10'
-                        : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-850 text-slate-500 hover:text-red-600'
+                        ? 'bg-red-50 dark:bg-red-955/40 border-red-200 text-red-600 shadow-md shadow-red-100/10'
+                        : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-850 text-slate-500 hover:text-red-650'
                     }`}
                   >
                     <AlertCircle className="w-4.5 h-4.5 shrink-0 text-red-500" />
                     <span>🚩 Flagged Queue</span>
                   </button>
                 )}
-              </div>
-            </div>
-
-            {/* Desktop Left Side Quota & Fast-Load Optimizer */}
-            <div className="hidden lg:block bg-gradient-to-r from-emerald-500/15 via-teal-500/5 to-transparent dark:from-emerald-950/25 dark:via-teal-950/5 dark:to-transparent border border-emerald-500/20 dark:border-emerald-900/30 rounded-[2rem] p-5 shadow-sm transition-colors relative overflow-hidden mt-5">
-              <div className="space-y-1 text-left">
-                <div className="flex items-center space-x-2">
-                  <span className="flex-shrink-0 inline-flex items-center justify-center p-1 bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 rounded-lg">
-                    <Zap className="w-4 h-4 text-emerald-600 dark:text-emerald-400 animate-pulse shrink-0" />
-                  </span>
-                  <h4 className="text-[10px] font-black uppercase tracking-wider text-slate-750 dark:text-slate-200 font-display">
-                    Fast-Load Cache
-                  </h4>
-                </div>
-                <p className="text-[10px] text-slate-450 dark:text-slate-500 leading-normal font-medium font-sans pt-1">
-                  Saves Firestore daily read usage bounds. Packs questions into high-speed packages so client devices access instantly with 0 delay!
-                </p>
-              </div>
-
-              <div className="mt-4">
-                <button
-                  onClick={() => rebuildCloudQuestionsChunks()}
-                  className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-[10px] uppercase tracking-widest rounded-xl shadow-lg shadow-emerald-100/15 dark:shadow-none transition hover:scale-[1.01] active:scale-95 cursor-pointer flex items-center justify-center gap-1.5"
-                >
-                  <Zap className="h-3.5 w-3.5 text-emerald-200" />
-                  <span>Compile Cache</span>
-                </button>
               </div>
             </div>
           </nav>
@@ -3658,27 +3715,8 @@ export default function Dashboard() {
 
                   {/* Right Column: Console Shortcuts & Global Database Management */}
                   <div className="space-y-4">
-                    <form onSubmit={handleAddNewSubjectTag} className="p-5 bg-slate-50 dark:bg-slate-850 rounded-[2rem] border border-slate-200 dark:border-slate-750/65 shadow-sm">
-                      <div className="border-b border-slate-100 dark:border-slate-800 pb-2 mb-3">
-                        <label className="text-[10px] font-black text-indigo-650 dark:text-indigo-400 uppercase tracking-widest block font-sans">Add Custom Bulk Subject Tag</label>
-                        <p className="text-[9px] text-slate-400 font-medium mt-0.5 leading-normal">Creates a standalone subject classification category in your practice database dropdown tables.</p>
-                      </div>
-                      <div className="flex space-x-2">
-                        <input 
-                          type="text" 
-                          value={newCustomTagInput} 
-                          onChange={(e) => setNewCustomTagInput(e.target.value)}
-                          placeholder="e.g. Geography Level 1" 
-                          className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-705 text-[11px] font-bold px-3 py-2.5 rounded-xl outline-none text-slate-900 dark:text-slate-100"
-                        />
-                        <button type="submit" className="bg-indigo-600 hover:bg-indigo-700 text-white p-2.5 rounded-xl transition-all cursor-pointer">
-                          <Plus className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </form>
-
                     {/* Firestore Quota & Limit Live Tracker Component */}
-                    <div className="p-4 bg-slate-50 dark:bg-slate-950 rounded-2xl border border-slate-200/60 dark:border-slate-800/80 space-y-3 font-sans">
+                    <div id="firestore-quota-tracker" className="p-4 bg-slate-50 dark:bg-slate-950 rounded-2xl border border-slate-200/60 dark:border-slate-800/80 space-y-3 font-sans">
                       <div className="flex justify-between items-center border-b border-slate-200/50 dark:border-slate-800 pb-2">
                         <div className="flex items-center space-x-2">
                           <Activity className="h-4 w-4 text-indigo-500 shrink-0" />
@@ -3773,7 +3811,7 @@ export default function Dashboard() {
                               setIsQuotaExceeded(false);
                             }
                           }}
-                          className="py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-755 text-slate-650 dark:text-slate-300 font-extrabold text-[9px] uppercase tracking-wider rounded-xl transition-all cursor-pointer border border-slate-200/20 font-sans"
+                          className="py-1.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-755 text-slate-655 dark:text-slate-300 font-extrabold text-[9px] uppercase tracking-wider rounded-xl transition-all cursor-pointer border border-slate-200/20 font-sans"
                         >
                           🔄 Zero Local Metrics
                         </button>
@@ -3789,23 +3827,6 @@ export default function Dashboard() {
                           <p className="font-extrabold">{quotaTestResult.msg}</p>
                         </div>
                       )}
-                    </div>
-
-                    {/* Cloud Fast-Load Cache Builder Card */}
-                    <div className="p-3.5 bg-gradient-to-r from-emerald-500/10 via-teal-500/10 to-transparent rounded-2xl border border-emerald-500/20">
-                      <div className="flex items-center space-x-2 mb-1.5">
-                        <Zap className="h-4 w-4 text-emerald-500 animate-pulse shrink-0" />
-                        <span className="text-[10px] font-black text-emerald-600 dark:text-emerald-400 uppercase tracking-widest font-sans">Quota & Fast-Load Optimizer</span>
-                      </div>
-                      <p className="text-[9px] text-slate-500 leading-normal mb-2.5 font-sans">
-                        Saves Firestore daily read usage bounds. Packs raw questions into high-speed JSON secure bundles so client loads instantly with 0 pressure!
-                      </p>
-                      <button
-                        onClick={() => rebuildCloudQuestionsChunks()}
-                        className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-[9px] uppercase tracking-wider rounded-xl shadow-lg hover:scale-[1.01] active:scale-95 transition cursor-pointer"
-                      >
-                        ⚡ Rebuild Cloud Fast-Load Cache
-                      </button>
                     </div>
 
                     {/* Quick navigation links */}
