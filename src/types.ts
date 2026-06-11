@@ -1,55 +1,38 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
 export interface Question {
   id: string;
   questionText: string;
   options: string[];
-  correctAnswerIndex: number; // Index 0-3 corresponding to options
+  correctAnswerIndex: number;
   explanation?: string;
   subject: string;
-  difficulty?: 'Easy' | 'Medium' | 'Hard';
   topic?: string;
   subtopic?: string;
+  difficulty?: string;
   sourceType?: string;
   timesAnswered?: number;
   timesCorrect?: number;
   targetExam?: string;
-  isBookmarked?: boolean;
-  needsReview?: boolean;
+  updatedAt?: string;
+  createdAt?: string;
 }
 
-export interface AttemptAnswer {
+export interface UserAnswer {
   questionId: string;
-  selectedIndex: number | null; // index of selected option, or null if skipped
+  selectedIndex: number | null;
   isCorrect: boolean;
 }
 
 export interface TestAttempt {
   id: string;
-  date: string; // ISO String
-  timestamp: number;
   subject: string;
+  date: string;
+  scorePercentage: number;
   totalQuestions: number;
   correctCount: number;
   incorrectCount: number;
   unattemptedCount: number;
-  timeTaken: number; // in seconds
-  totalTimeAllocated: number; // in seconds
-  scorePercentage: number;
-  answers: AttemptAnswer[];
-}
-
-export interface LeaderboardUser {
-  id: string;
-  name: string;
-  rank: number;
-  totalScore: number; // accumulated points or average mock score
-  testsTaken: number;
-  averageAccuracy: number; // 0 to 100
-  isCurrentUser?: boolean;
+  timeTaken: number;
+  answers: UserAnswer[];
 }
 
 export interface QuizSettings {
@@ -62,7 +45,7 @@ export interface QuizSettings {
 export interface ExamCounter {
   id: string;
   name: string;
-  targetDate: string; // ISO date string
+  targetDate: string;
 }
 
 export interface DailyGoal {
@@ -70,5 +53,14 @@ export interface DailyGoal {
   currentTarget: number;
   progressToday: number;
   streak: number;
-  lastUpdateDate: string; // ISO Date YYYY-MM-DD
+  lastUpdateDate: string;
 }
+
+export interface ExamConfig {
+  id: string;
+  name: string;
+  durationMinutes: number;
+  subjectDistribution: Record<string, number>;
+  sourceExamTag?: string;
+}
+
