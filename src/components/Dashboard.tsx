@@ -14,7 +14,9 @@ import {
   setDoc,
   deleteDoc,
   getDocs,
-  where
+  where,
+  limit,
+  orderBy
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { parseUniversalHTML, normalizeHindiText } from '../lib/htmlParser';
@@ -771,7 +773,9 @@ export default function Dashboard() {
             console.log(`Starting incremental sync since: ${localLastSynced}`);
             const qIncrement = query(
               collection(db, "questions"), 
-              where("updatedAt", ">", localLastSynced)
+              where("updatedAt", ">", localLastSynced),
+              orderBy("updatedAt", "asc"),
+              limit(1000)
             );
             const snap = await getDocs(qIncrement);
             trackFirestoreRead(snap.empty ? 1 : snap.size);
@@ -897,7 +901,9 @@ export default function Dashboard() {
                   console.log(`Checking for incremental updates since chunk creation context: ${maxTime}`);
                   const incSnap = await getDocs(query(
                     collection(db, "questions"),
-                    where("updatedAt", ">", maxTime)
+                    where("updatedAt", ">", maxTime),
+                    orderBy("updatedAt", "asc"),
+                    limit(1000)
                   ));
                   trackFirestoreRead(incSnap.empty ? 1 : incSnap.size);
                   if (!incSnap.empty) {
@@ -949,7 +955,11 @@ export default function Dashboard() {
 
           if (!loadedFromChunks) {
             // Fallback to reading individual documents (legacy)
-            const fullSnap = await getDocs(query(collection(db, "questions")));
+            const fullSnap = await getDocs(query(
+              collection(db, "questions"),
+              orderBy("updatedAt", "desc"),
+              limit(1000)
+            ));
             trackFirestoreRead(fullSnap.empty ? 1 : fullSnap.size);
             const fullList: Question[] = [];
             let maxTime = '2000-01-01T00:00:00.000Z';
