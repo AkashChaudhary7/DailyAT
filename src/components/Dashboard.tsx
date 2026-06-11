@@ -664,6 +664,7 @@ export default function Dashboard() {
 
   const [searchQuery, setSearchQuery] = useState("");
   const [filterSubject, setFilterSubject] = useState("All");
+  const [filterExam, setFilterExam] = useState("All");
   const [filterClassifiedOnly, setFilterClassifiedOnly] = useState<boolean>(false);
   const [visibleCount, setVisibleCount] = useState(24);
   const [copyingAll, setCopyingAll] = useState<boolean | null>(false);
@@ -671,7 +672,7 @@ export default function Dashboard() {
   // Automatically reset visible limit when search query or filter updates
   useEffect(() => {
     setVisibleCount(24);
-  }, [searchQuery, filterSubject, filterClassifiedOnly]);
+  }, [searchQuery, filterSubject, filterExam, filterClassifiedOnly]);
 
   const copyAllStagedToClipboard = async () => {
     if (stagedQuestions.length === 0) return;
@@ -1590,6 +1591,85 @@ export default function Dashboard() {
     setNewExplanation("");
   };
 
+  const handleBulkDeleteSubject = async () => {
+    if (filterSubject === 'All') return;
+    const toDelete = questions.filter(q => q.subject === filterSubject);
+    if (!toDelete.length) return;
+    
+    if (window.confirm(`Are you sure you want to PERMANENTLY delete ALL ${toDelete.length} questions tagged as "${filterSubject}"? This cannot be undone.`)) {
+      setIsScanningDuplicates(true);
+      setDuplicateScanStatus(`Deleting ${toDelete.length} questions...`);
+      try {
+        const remaining = questions.filter(q => q.subject !== filterSubject);
+        saveQuestionsToDB(remaining);
+        
+        // Let's delete locally generated items from IndexedDB
+        for (const item of toDelete) {
+          try { await deleteQuestionFromIndexedDB(item.id); } 
+          catch (e) { /* ignore */ }
+        }
+
+        if (isOnline) {
+          // If questions are synced to cloud, we can only safely delete a subset at once or we can just update the whole list via the UI refresh, 
+          // but true deletion requires doc removal. For safety we iterate.
+          const collectionRef = collection(db, "questions");
+          for (const item of toDelete) {
+             const docId = (item as any).firestoreId || item.id;
+             try { await deleteDoc(doc(db, "questions", docId)); }
+             catch (e) { /* ignore */ }
+          }
+          await setDoc(doc(db, "db_metadata", "system"), { lastUpdated: new Date().toISOString() }, { merge: true });
+        }
+        
+        alert(`Successfully deleted ${toDelete.length} questions from ${filterSubject}.`);
+        setFilterSubject('All');
+      } catch (err) {
+        console.error("Deletion error:", err);
+      } finally {
+        setIsScanningDuplicates(false);
+        setDuplicateScanStatus(null);
+      }
+    }
+  };
+
+  const handleBulkDeleteExam = async () => {
+    if (filterExam === 'All') return;
+    const toDelete = questions.filter(q => q.targetExam === filterExam);
+    if (!toDelete.length) return;
+    
+    if (window.confirm(`Are you sure you want to PERMANENTLY delete ALL ${toDelete.length} questions tagged under Exam "${filterExam}"? This cannot be undone.`)) {
+      setIsScanningDuplicates(true);
+      setDuplicateScanStatus(`Deleting ${toDelete.length} questions...`);
+      try {
+        const remaining = questions.filter(q => q.targetExam !== filterExam);
+        saveQuestionsToDB(remaining);
+        
+        for (const item of toDelete) {
+          try { await deleteQuestionFromIndexedDB(item.id); } 
+          catch (e) { /* ignore */ }
+        }
+
+        if (isOnline) {
+          const collectionRef = collection(db, "questions");
+          for (const item of toDelete) {
+             const docId = (item as any).firestoreId || item.id;
+             try { await deleteDoc(doc(db, "questions", docId)); }
+             catch (e) { /* ignore */ }
+          }
+          await setDoc(doc(db, "db_metadata", "system"), { lastUpdated: new Date().toISOString() }, { merge: true });
+        }
+        
+        alert(`Successfully deleted ${toDelete.length} questions from exam ${filterExam}.`);
+        setFilterExam('All');
+      } catch (err) {
+        console.error("Deletion error:", err);
+      } finally {
+        setIsScanningDuplicates(false);
+        setDuplicateScanStatus(null);
+      }
+    }
+  };
+
   const handleDeleteFromBank = async (id: string) => {
     if (window.confirm("Are you sure you want to remove this question?")) {
       const next = questions.filter(q => q.id !== id);
@@ -2243,6 +2323,14 @@ export default function Dashboard() {
     return Array.from(list);
   }, [activeQuestionsPoolForListing]);
 
+  const availableExams = useMemo(() => {
+    const list = new Set<string>();
+    activeQuestionsPoolForListing.forEach(q => {
+      if (q.targetExam) list.add(q.targetExam);
+    });
+    return Array.from(list).sort();
+  }, [activeQuestionsPoolForListing]);
+
   const availableTargetExams = useMemo(() => {
     const list = new Set<string>();
     activeQuestionsPoolForListing.forEach(q => {
@@ -2271,17 +2359,19 @@ export default function Dashboard() {
   const filteredQuestions = useMemo(() => {
     const queryLower = searchQuery.toLowerCase();
     const subjectLower = filterSubject.toLowerCase();
+    const examLower = filterExam.toLowerCase();
     return activeQuestionsPoolForListing.filter(q => {
       const qText = q.questionText || "";
       const matchSearch = searchQuery === "" || 
                           qText.toLowerCase().includes(queryLower) || 
                           (q.options && q.options.some((opt: string) => opt.toLowerCase().includes(queryLower)));
       const matchFilter = filterSubject === "All" || (q.subject && q.subject.toLowerCase() === subjectLower);
+      const matchExam = filterExam === "All" || (q.targetExam && q.targetExam.toLowerCase() === examLower);
       const isClassified = q.topic && q.topic !== "" && q.topic !== "General" && q.topic !== "General Knowledge Studies";
       const matchClassified = !filterClassifiedOnly || isClassified;
-      return matchSearch && matchFilter && matchClassified;
+      return matchSearch && matchFilter && matchExam && matchClassified;
     });
-  }, [activeQuestionsPoolForListing, searchQuery, filterSubject, filterClassifiedOnly]);
+  }, [activeQuestionsPoolForListing, searchQuery, filterSubject, filterExam, filterClassifiedOnly]);
 
   const totalTests = attempts.length;
   const avgAccuracy = totalTests > 0 
@@ -2635,6 +2725,12 @@ export default function Dashboard() {
                 </div>
 
                 <DailyGoalCard goal={dailyGoal} onUpdateTarget={handleUpdateDailyBaseTarget} />
+
+                <div className="bg-gradient-to-r from-indigo-500 via-purple-500 to-indigo-500 p-3 rounded-xl animate-[pulse_3s_ease-in-out_infinite] shadow-lg shadow-indigo-500/20 text-center relative group overflow-hidden">
+                  <div className="absolute inset-0 bg-white/20 blur-md pointer-events-none group-hover:bg-white/30 transition-all duration-300"></div>
+                  <span className="text-[10px] uppercase font-black tracking-widest text-white/90 block mb-0.5 relative z-10 font-display">Live Database Question Pool</span>
+                  <span className="text-2xl font-black text-white font-display relative z-10">{questions.length}</span>
+                </div>
 
                 <div className="grid grid-cols-3 gap-3 animate-fade-in shadow-sm">
                   <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-3 rounded-xl">
@@ -3331,7 +3427,21 @@ export default function Dashboard() {
 
                   <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
                     <div className="flex items-center space-x-2">
-                      <span className="text-xs font-bold text-slate-400 uppercase shrink-0">Filter:</span>
+                      <span className="text-xs font-bold text-slate-400 uppercase shrink-0">Exam:</span>
+                      <select
+                        value={filterExam}
+                        onChange={(e) => setFilterExam(e.target.value)}
+                        className="w-full sm:w-44 text-xs font-semibold h-10 border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 rounded-xl px-3 outline-none text-slate-900 dark:text-slate-100"
+                      >
+                        <option value="All" className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">All Exams</option>
+                        {availableExams.map((ex, idx) => (
+                          <option key={`ex-${idx}`} value={ex} className="bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100">{ex}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="flex items-center space-x-2">
+                      <span className="text-xs font-bold text-slate-400 uppercase shrink-0">Sub:</span>
                       <select
                         value={filterSubject}
                         onChange={(e) => setFilterSubject(e.target.value)}
@@ -3354,8 +3464,31 @@ export default function Dashboard() {
                       title="Show only classified / auto-tagged standard questions"
                     >
                       <Sparkles className="w-3.5 h-3.5" />
-                      <span>{filterClassifiedOnly ? "Showing Classified Only" : "Show Classified Only"}</span>
                     </button>
+
+                    {filterSubject !== "All" && filterExam === "All" && (
+                      <button
+                        onClick={handleBulkDeleteSubject}
+                        disabled={isScanningDuplicates}
+                        className="h-10 px-3.5 rounded-xl text-xs font-bold flex items-center space-x-1.5 transition-all outline-none border cursor-pointer bg-rose-50 dark:bg-rose-950/20 text-rose-600 border-rose-200 dark:border-rose-900 hover:bg-rose-100 dark:hover:bg-rose-900/40 disabled:opacity-50"
+                        title={`Delete all questions tagged as ${filterSubject}`}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">Tag</span>
+                      </button>
+                    )}
+
+                    {filterExam !== "All" && (
+                      <button
+                        onClick={handleBulkDeleteExam}
+                        disabled={isScanningDuplicates}
+                        className="h-10 px-3.5 rounded-xl text-xs font-bold flex items-center space-x-1.5 transition-all outline-none border cursor-pointer bg-rose-50 dark:bg-rose-950/20 text-rose-600 border-rose-200 dark:border-rose-900 hover:bg-rose-100 dark:hover:bg-rose-900/40 disabled:opacity-50"
+                        title={`Delete all questions exported from Exam: ${filterExam}`}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline">Exam</span>
+                      </button>
+                    )}
                   </div>
                 </div>
 
