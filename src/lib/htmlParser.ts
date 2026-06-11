@@ -521,6 +521,46 @@ export async function parseUniversalHTML(htmlString: string, targetExam: string)
   const questions: Question[] = [];
   if (!htmlString) return questions;
 
+  const isValidParsedQuestion = (qText: string): boolean => {
+    if (!qText) return false;
+    let cleanQ = qText.replace(/[\n\r]+/g, ' ').trim();
+    
+    // Remove "Question X:" prefix if it exists before checking for garbage length
+    cleanQ = cleanQ.replace(/^(?:Question|Q)\s*[0-9]+[:.\-]?\s*/i, "");
+    
+    if (cleanQ.length < 5) return false;
+    
+    const lowerQ = cleanQ.toLowerCase();
+    
+    // Explicit blacklist of standard UI text from test websites
+    const garbagePrefixes = [
+      "samyak", "instructions", "this test contains", "each question has only",
+      "you will have", "questions have different marks", "click on the option to",
+      "you can mark questions", "you can navigate between", "click \"submit\"",
+      "test results", "score", "time taken", "avg time", "positive marks", 
+      "negative marks", "detailed breakdown", "leave test", "your progress will be lost",
+      "confirm submission", "you have attempted", "options:", "correct answer:",
+      "start test", "join channel", "contact admin", "question navigation",
+      "take again", "review test", "eo-ro administrative", "questions navigation"
+    ];
+    
+    for (const g of garbagePrefixes) {
+      if (lowerQ === g || lowerQ.startsWith(g) || lowerQ.includes(g)) return false;
+    }
+    
+    // Pattern matching for typical garbage strings (e.g. "120 Questions\n120 Total Marks")
+    if (/^[0-9\s]*(?:questions|total marks|min\s*duration|duration|unattempted|marked for review|incorrect answers|correct answers|attempted|%|accuracy)/i.test(lowerQ)) {
+      return false;
+    }
+
+    // specific strict checking for small strings
+    if (cleanQ.length < 20 && (/^[0-9]+$/i.test(cleanQ) || /^(?:Option|Question)\s+[0-9]+$/i.test(cleanQ))) {
+      return false;
+    }
+    
+    return true;
+  };
+
   try {
     // Execution pipeline string cleanup before document element traversal begins
     const cleanedHtmlInput = normalizeHindiText(htmlString);
@@ -566,16 +606,20 @@ export async function parseUniversalHTML(htmlString: string, targetExam: string)
               timesCorrect: 0,
               targetExam: targetExam
             };
-          });
+          }).filter((q: Question) => isValidParsedQuestion(q.questionText));
         }
       } catch (err) {
         console.warn("Failed to fetch remote JSON:", err);
       }
     }
 
-    let jsonMatchStartIndex = cleanedHtmlInput.indexOf("const QUESTIONS =");
+    let jsonMatchStartIndex = -1;
+    const regexMatch = cleanedHtmlInput.match(/const\s+QUESTIONS\s*=/i);
+    if (regexMatch && regexMatch.index !== undefined) {
+      jsonMatchStartIndex = regexMatch.index + regexMatch[0].length;
+    }
+    
     if (jsonMatchStartIndex !== -1) {
-      jsonMatchStartIndex += "const QUESTIONS =".length;
       let openBrackets = 0, arrayText = "", started = false, inString = false, escapeNext = false;
       for (let i = jsonMatchStartIndex; i < cleanedHtmlInput.length; i++) {
          const char = cleanedHtmlInput[i];
@@ -801,12 +845,15 @@ export async function parseUniversalHTML(htmlString: string, targetExam: string)
     } catch (err) { console.error("Text layer layout tree generation boundary failure:", err); }
 
     if (textNodeQuestions.length > 0) {
-      return textNodeQuestions.map(q => ({
-        ...q,
-        questionText: overrideLegacyFontsInHtml(convertHtmlWithDevLys(q.questionText)),
-        options: q.options.map(opt => overrideLegacyFontsInHtml(convertHtmlWithDevLys(opt))),
-        explanation: overrideLegacyFontsInHtml(convertHtmlWithDevLys(q.explanation))
-      }));
+      const validTextNodes = textNodeQuestions.filter(q => isValidParsedQuestion(q.questionText));
+      if (validTextNodes.length > 0) {
+        return validTextNodes.map(q => ({
+          ...q,
+          questionText: overrideLegacyFontsInHtml(convertHtmlWithDevLys(q.questionText)),
+          options: q.options.map(opt => overrideLegacyFontsInHtml(convertHtmlWithDevLys(opt))),
+          explanation: overrideLegacyFontsInHtml(convertHtmlWithDevLys(q.explanation))
+        }));
+      }
     }
 
     // FALLBACK TAG STRUCTURE SEGMENTER
@@ -874,7 +921,13 @@ export async function parseUniversalHTML(htmlString: string, targetExam: string)
             currentQuestionStart = limit;
           }
         }
-        if (parsedList.length > 0) return parsedList;
+        const filteredParsedList = parsedList.filter(q => isValidParsedQuestion(q.questionText));
+        if (filteredParsedList.length > 0) return filteredParsedList.map(q => ({
+          ...q,
+          questionText: overrideLegacyFontsInHtml(convertHtmlWithDevLys(q.questionText)),
+          options: q.options.map(opt => overrideLegacyFontsInHtml(convertHtmlWithDevLys(opt))),
+          explanation: overrideLegacyFontsInHtml(convertHtmlWithDevLys(q.explanation))
+        }));
       }
     }
 
@@ -907,7 +960,13 @@ export async function parseUniversalHTML(htmlString: string, targetExam: string)
       });
     }
 
-    if (questions.length > 0) return questions;
+    const filteredQuestions = questions.filter(q => isValidParsedQuestion(q.questionText));
+    if (filteredQuestions.length > 0) return filteredQuestions.map(q => ({
+      ...q,
+      questionText: overrideLegacyFontsInHtml(convertHtmlWithDevLys(q.questionText)),
+      options: q.options.map(opt => overrideLegacyFontsInHtml(convertHtmlWithDevLys(opt))),
+      explanation: overrideLegacyFontsInHtml(convertHtmlWithDevLys(q.explanation))
+    }));
 
     // RAW PARAGRAPH BLOCKS STREAM ENGINE FALLBACK
     const paragraphs = Array.from(doc.querySelectorAll("p, div, li, span, h1, h2, h3, h4"));
@@ -956,7 +1015,7 @@ export async function parseUniversalHTML(htmlString: string, targetExam: string)
     console.error("Centralized compilation parser exception event:", err);
   }
 
-  return questions.map(q => ({
+  return questions.filter(q => isValidParsedQuestion(q.questionText)).map(q => ({
     ...q,
     questionText: overrideLegacyFontsInHtml(convertHtmlWithDevLys(q.questionText)),
     options: q.options.map(opt => overrideLegacyFontsInHtml(convertHtmlWithDevLys(opt))),
