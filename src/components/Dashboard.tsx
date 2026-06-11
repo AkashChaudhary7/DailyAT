@@ -626,6 +626,7 @@ export default function Dashboard() {
   const [uploadProgress, setUploadProgress] = useState<{current: number, total: number, questionsFound: number} | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [savingProgress, setSavingProgress] = useState(0);
+  const [savingProgressCount, setSavingProgressCount] = useState<{ current: number, total: number } | null>(null);
   const [importSuccess, setImportSuccess] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -1467,6 +1468,7 @@ export default function Dashboard() {
     }));
     setIsSaving(true);
     setSavingProgress(0);
+    setSavingProgressCount({ current: 0, total: prepared.length });
     setImportSuccess(null);
 
     const nextQList = [...questions];
@@ -1481,6 +1483,7 @@ export default function Dashboard() {
         item.id = item.id || docRef.id;
         (item as any).firestoreId = docRef.id;
         nextQList.push(item);
+        setSavingProgressCount({ current: i + 1, total });
         setSavingProgress(Math.round(((i + 1) / total) * 100));
       }
       
@@ -1503,11 +1506,13 @@ export default function Dashboard() {
         setImportSuccess(null);
         setIsSaving(false);
         setSavingProgress(0);
+        setSavingProgressCount(null);
       }, 3000);
     } catch (error: any) {
       console.error("Full Firestore Error details:", error);
       alert(`Firebase Error. Please check your configurations.`);
       setIsSaving(false);
+      setSavingProgressCount(null);
     }
   };
 
@@ -1760,6 +1765,9 @@ export default function Dashboard() {
         }
       }
       setSelectedAdminExamId("");
+      if (selectedExamId === id) {
+        setSelectedExamId("custom");
+      }
       alert("Exam Config Mapping successfully removed.");
     }
   };
@@ -2808,42 +2816,6 @@ export default function Dashboard() {
                     >
                       Untimed Practice Mode
                     </button>
-                  </div>
-                </div>
-
-                {/* Brand new Question Bank Category Density Box placed below launch test box */}
-                <div className="bg-white dark:bg-slate-900 rounded-[2.5rem] p-8 border border-slate-200/50 dark:border-slate-800/80 shadow-sm mt-6 text-left animate-fade-in">
-                  <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800/50 pb-3 mb-4">
-                    <span className="text-xs font-black tracking-wider text-slate-600 dark:text-slate-300 uppercase flex items-center gap-2 font-display">
-                      <span>📊</span> Question Bank Category Density
-                    </span>
-                    <span className="text-[9px] text-indigo-600 dark:text-indigo-400 uppercase tracking-widest font-black font-mono bg-indigo-50 dark:bg-indigo-950/40 px-2 py-0.5 rounded-md">
-                      {questions.length} total questions
-                    </span>
-                  </div>
-                  
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-                    {(() => {
-                      const activeCounts: Record<string, number> = {};
-                      questions.forEach(q => {
-                        const sub = q.subject || "General";
-                        activeCounts[sub] = (activeCounts[sub] || 0) + 1;
-                      });
-
-                      const items = Object.entries(activeCounts);
-                      if (items.length === 0) {
-                        return <div className="col-span-full py-4 text-center text-xs font-bold text-slate-400 italic">No cached questions available yet. Sync with Firestore to load.</div>;
-                      }
-
-                      return items.map(([subj, count]) => (
-                        <div key={subj} className="bg-slate-50 dark:bg-slate-850 p-3 rounded-2xl border border-slate-100 dark:border-slate-800 flex justify-between items-center transition hover:shadow-sm">
-                          <span className="text-xs font-bold text-slate-650 dark:text-slate-300 truncate pr-2" title={subj}>{subj}</span>
-                          <span className="shrink-0 text-[10px] font-bold font-mono bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 px-2 py-0.5 rounded-lg">
-                            {count}
-                          </span>
-                        </div>
-                      ));
-                    })()}
                   </div>
                 </div>
               </div>
@@ -4259,13 +4231,21 @@ export default function Dashboard() {
                   {isSaving && (
                     <div className="bg-slate-50 dark:bg-slate-850 p-4 rounded-2xl border border-indigo-100 dark:border-indigo-900/30 mb-4 animate-pulse">
                       <div className="flex justify-between items-center mb-2">
-                        <span className="text-xs font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest">Committing to Firebase...</span>
-                        <span className="text-xs font-mono font-bold">{savingProgress}%</span>
+                        <span id="committing-header-status-span" className="text-xs font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest flex items-center space-x-2">
+                          <span>📦</span>
+                          <span>Committing to Firebase...</span>
+                        </span>
+                        <span id="saving-count-metrics-span" className="text-xs font-mono font-black text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-950 px-2 py-0.5 rounded-md">
+                          {savingProgressCount ? `${savingProgressCount.current} of ${savingProgressCount.total}` : '0 of 0'} questions added
+                        </span>
                       </div>
                       <div className="w-full bg-slate-200 dark:bg-slate-800 rounded-full h-2.5 overflow-hidden">
-                        <div className="bg-indigo-600 h-full transition-all duration-300" style={{ width: `${savingProgress}%` }} />
+                        <div className="bg-indigo-600 h-full transition-all duration-300" style={{ width: `${savingProgressCount ? (savingProgressCount.current / Math.max(1, savingProgressCount.total)) * 100 : 0}%` }} />
                       </div>
-                      <p className="text-[10px] text-slate-400 mt-2 text-center italic">Writing data structures securely to cloud indexes...</p>
+                      <p className="text-[10px] text-slate-400 mt-2 text-center italic font-sans flex items-center justify-center space-x-1">
+                        <span>Uploading live:</span>
+                        <span className="font-extrabold text-indigo-600 dark:text-indigo-400">{savingProgressCount?.current || 0} currently added out of {savingProgressCount?.total || 0} total questions!</span>
+                      </p>
                     </div>
                   )}
 
